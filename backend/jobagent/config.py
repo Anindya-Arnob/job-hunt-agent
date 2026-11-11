@@ -6,6 +6,7 @@ in the database (table `appsetting`) and override these at runtime.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass, field, fields
@@ -83,6 +84,23 @@ class Settings:
     claude_cli_path: str = field(default_factory=lambda: _env("CLAUDE_CLI_PATH", ""))
     apply_daily_limit: int = field(default_factory=lambda: int(_env("APPLY_DAILY_LIMIT", "20")))
     owner_name: str = field(default_factory=lambda: _env("OWNER_NAME", ""))     # empty = the name on your main CV
+
+    # --- CV building -------------------------------------------------------------
+    cv_model: str = field(default_factory=lambda: _env("CV_MODEL", ""))          # haiku / sonnet / opus / fable / model id
+    letter_model: str = field(default_factory=lambda: _env("LETTER_MODEL", ""))
+    cv_effort: str = field(default_factory=lambda: _env("CV_EFFORT", ""))        # low / medium / high (Claude Code)
+    cv_projects: int = field(default_factory=lambda: int(_env("CV_PROJECTS", "3")))
+    github_projects: bool = field(default_factory=lambda: _env("GITHUB_PROJECTS", "true").lower() == "true")
+    github_user: str = field(default_factory=lambda: _env("GITHUB_USER", ""))    # empty = the GitHub link on your CV
+    github_token: str = field(default_factory=lambda: _env("JOBHUNT_GITHUB_TOKEN", ""))  # optional: private repos, higher limit
+    ats_target: int = field(default_factory=lambda: int(_env("ATS_TARGET", "75")))
+    recruiter_review: bool = field(default_factory=lambda: _env("RECRUITER_REVIEW", "true").lower() == "true")
+    humanize: bool = field(default_factory=lambda: _env("HUMANIZE", "true").lower() == "true")
+    state_availability: bool = field(default_factory=lambda: _env("STATE_AVAILABILITY", "true").lower() == "true")
+    # --- Claude Code extras ----------------------------------------------------------
+    claude_lean: bool = field(default_factory=lambda: _env("CLAUDE_LEAN", "true").lower() == "true")
+    claude_skills: bool = field(default_factory=lambda: _env("CLAUDE_SKILLS", "false").lower() == "true")
+    claude_plugins: str = field(default_factory=lambda: _env("CLAUDE_PLUGINS", "{}"))   # JSON {"name@market": true}
     host: str = field(default_factory=lambda: _env("HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: int(_env("PORT", "8780")))
 
@@ -133,7 +151,11 @@ class Settings:
         "schedule_enabled", "page_delay_seconds", "max_pages_per_search", "headless_guest",
         "websearch_enabled", "websearch_engine", "websearch_max_calls", "websearch_searches_per_call",
         "websearch_other_sites", "websearch_cli_model", "claude_cli_path", "apply_daily_limit",
+        "cv_model", "letter_model", "cv_effort", "cv_projects", "github_projects", "github_user", "github_token",
+        "ats_target", "recruiter_review", "humanize", "state_availability",
+        "claude_lean", "claude_skills", "claude_plugins",
     )
+    SECRET = ("github_token",)
 
     def apply_overrides(self, overrides: dict) -> None:
         types = {f.name: f.type for f in fields(self)}
@@ -141,6 +163,10 @@ class Settings:
             if key not in self.EDITABLE:
                 continue
             current = getattr(self, key)
+            if key in self.SECRET and value in (None, "********"):
+                continue
+            if isinstance(value, (dict, list)) and isinstance(current, str):
+                value = json.dumps(value)
             if isinstance(current, bool):
                 value = value if isinstance(value, bool) else str(value).lower() == "true"
             elif isinstance(current, int):
@@ -151,7 +177,8 @@ class Settings:
         _ = types
 
     def public_dict(self) -> dict:
-        d = {k: getattr(self, k) for k in self.EDITABLE}
+        d = {k: getattr(self, k) for k in self.EDITABLE if k not in self.SECRET}
+        d["has_github_token"] = bool(self.github_token)
         d["effective_llm_mode"] = self.effective_llm_mode
         d["has_api_key"] = bool(self.anthropic_api_key)
         d["job_dir"] = self.job_dir

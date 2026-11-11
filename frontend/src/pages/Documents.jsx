@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Download, FolderOpen, Pencil, Save, Trash2 } from 'lucide-react'
 import { api, fileUrl, fmtDate } from '../api'
 import { CheckList, Empty, Modal, PdfPages, useAsync, useToast } from '../ui'
+import AtsPanel, { AtsBadge } from '../components/AtsPanel'
 
 export default function Documents() {
   const [params, setParams] = useSearchParams()
@@ -50,7 +51,7 @@ export default function Documents() {
         {groups.map((x) => (
           <button key={x.job_id} onClick={() => setParams({ job: x.job_id })}
             className={`block w-full border-b border-slate-100 px-4 py-2.5 text-left text-sm ${x.job_id === jobId ? 'bg-teal-50' : 'hover:bg-slate-50'}`}>
-            <div className="font-medium">{x.company}</div><div className="truncate text-xs muted">{x.title}</div>
+            <div className="flex items-center gap-2"><span className="truncate font-medium">{x.company}</span><span className="ml-auto shrink-0"><AtsBadge ats={x.docs.cv?.ats} /></span></div><div className="truncate text-xs muted">{x.title}</div>
             <div className="mt-0.5 text-xs">{Object.values(x.docs).some((d) => d.imported) ? <span className="text-slate-500">earlier build</span>
               : Object.values(x.docs).every((d) => d.qa_passed) ? <span className="text-emerald-700">✓ checks passed</span> : <span className="text-amber-700">⚠ needs attention</span>}
               {Object.values(x.docs).some((d) => d.outdated) && <span className="text-amber-700"> · older CV</span>}</div>
@@ -71,9 +72,12 @@ export default function Documents() {
             <div className="card flex flex-col overflow-hidden">
               <div className="card-h text-sm">Tailored CV</div>
               {g.docs.cv && <PdfPages path={g.docs.cv.pdf_path} bust={bust} />}
-              {g.docs.cv && <div className="max-h-40 overflow-y-auto border-t border-slate-100 p-3">{g.docs.cv.imported
+              {g.docs.cv && <div className="max-h-72 space-y-3 overflow-y-auto border-t border-slate-100 p-3">{g.docs.cv.imported
                 ? <p className="text-sm muted">Built earlier, before this app (found in your Claude CV folder). Checks weren't run. Use Rebuild on the job board to make a checked, editable version.</p>
-                : <CheckList checks={g.docs.cv.qa_results} />}</div>}
+                : <>
+                  <AtsPanel ats={g.docs.cv.ats} projects={g.docs.cv.projects_used} review={g.docs.cv.review} />
+                  {!g.docs.cv.ats && <p className="text-xs muted">Built before ATS scoring existed. Rebuild to see the ATS score before and after.</p>}
+                  <CheckList checks={g.docs.cv.qa_results} /></>}</div>}
             </div>
             <div className="card flex flex-col overflow-hidden">
               <div className="card-h text-sm">

@@ -38,13 +38,12 @@ def _api(prompt: str) -> str:
 
 
 def _cli(prompt: str) -> str:
-    from ..feeds.websearch import claude_cli
-    exe = claude_cli()
-    args = ["-p", "--output-format", "json", "--max-turns", "1", "--disallowedTools", "Bash,Edit,Write,WebFetch,WebSearch"]
-    if settings.websearch_cli_model:
-        args += ["--model", settings.websearch_cli_model]
-    cmd = (["cmd", "/c", exe] if exe.lower().endswith((".cmd", ".bat")) else [exe]) + args
+    from pathlib import Path
+    from .. import claude_code as cc
+    exe = cc.exe()
     with tempfile.TemporaryDirectory() as cwd:
+        extra, _ = cc.flags(Path(cwd), system=None, no_tools=True, model=cc.cli_model(""))
+        cmd = cc.prefix(exe) + ["-p", "--output-format", "json", "--max-turns", "1"] + extra
         out = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, cwd=cwd, timeout=180)
     try:
         data = json.loads(out.stdout.decode("utf-8", "replace"))

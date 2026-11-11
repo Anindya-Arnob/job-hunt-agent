@@ -115,8 +115,9 @@ export function CheckList({ checks }) {
     <ul className="space-y-1">
       {checks.map((c, i) => (
         <li key={i} className="flex items-start gap-1.5 text-sm">
-          {c.passed ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-600" /> : <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />}
-          <span>{c.name}{c.detail && <span className="muted"> — {c.detail}</span>}</span>
+          {c.passed ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-600" />
+            : c.soft ? <Info size={15} className="mt-0.5 shrink-0 text-sky-600" /> : <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />}
+          <span className={!c.passed && c.soft ? 'text-slate-600' : ''}>{c.name}{c.detail && <span className="muted"> · {c.detail}</span>}{!c.passed && c.soft && <span className="ml-1 text-[11px] text-sky-700">(tip)</span>}</span>
         </li>
       ))}
     </ul>

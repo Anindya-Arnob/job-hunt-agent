@@ -187,6 +187,14 @@ class CheckResult(BaseModel):
     issues: list[str] = Field(default_factory=list, description="Concrete problems the writer must fix")
 
 
+class ReviewResult(BaseModel):
+    """A recruiter's first look at the tailored CV."""
+    verdict: Literal["interview", "maybe", "reject"]
+    reason: str = Field("", description="One sentence: why, in a recruiter's words")
+    fixes: list[str] = Field(default_factory=list, description="Concrete changes to the CV text that are true to the main CV, max 5")
+    knockouts: list[str] = Field(default_factory=list, description="Requirements the candidate does not meet; the CV cannot fix these")
+
+
 class LetterContent(BaseModel):
     recipient: str = Field("", description="e.g. 'Hiring Team, Company GmbH'")
     subject: str

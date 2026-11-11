@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Hammer, Play } from 'lucide-react'
+import { ChevronDown, Hammer, Play, SlidersHorizontal } from 'lucide-react'
 import { api, fmtTime } from '../api'
 import { CheckList, Empty, ScoreBar, StatusBadge, useAsync, useToast, VerdictBadge } from '../ui'
 import { useEvents, useOnEvent } from '../events'
+import BuildOptions from '../components/BuildOptions'
+import { AtsBadge } from '../components/AtsPanel'
 
 export default function BuildQueue() {
   const toast = useToast()
@@ -11,6 +13,7 @@ export default function BuildQueue() {
   const cands = useAsync(() => api.get('/api/build/candidates'))
   const docs = useAsync(() => api.get('/api/documents'))
   const [picked, setPicked] = useState([])
+  const [showOpts, setShowOpts] = useState(false)
   const { events } = useEvents()
   useOnEvent((ev) => { if (['run_done', 'run_failed', 'review', 'run_started'].includes(ev.type)) { runs.reload(); docs.reload(); cands.reload() } }, [])
 
@@ -43,6 +46,9 @@ export default function BuildQueue() {
         <h1 className="h1">Build queue</h1>
         {!paused && !active && <button className="btn-outline" onClick={startReview}>Start a review of all scored jobs</button>}
       </div>
+      <button className="btn-outline" onClick={() => setShowOpts(!showOpts)}><SlidersHorizontal size={14} />Build options: model, projects, GitHub, ATS
+        <ChevronDown size={14} className={`transition ${showOpts ? 'rotate-180' : ''}`} /></button>
+      {showOpts && <BuildOptions compact />}
       <div className="grid gap-5 xl:grid-cols-5">
         <div className="card xl:col-span-3">
           <div className="card-h">{paused ? 'Waiting for your review – tick the jobs to build' : 'Ready to build (score 40+)'}
@@ -93,7 +99,7 @@ export default function BuildQueue() {
           <div className="divide-y divide-slate-100">
             {Object.entries(byJob).map(([jid, g]) => (
               <div key={jid} className="grid gap-3 p-4 md:grid-cols-3">
-                <div><Link to={`/jobs/${jid}`} className="font-semibold hover:text-teal">{g.title}</Link><div className="text-xs muted">{g.company}</div>
+                <div><Link to={`/jobs/${jid}`} className="font-semibold hover:text-teal">{g.title}</Link><div className="flex items-center gap-2 text-xs muted">{g.company}<AtsBadge ats={g.docs.find((d) => d.kind === 'cv')?.ats} /></div>
                   <Link to={`/documents?job=${jid}`} className="text-xs text-teal">Preview & edit →</Link></div>
                 {g.docs.sort((a, b) => a.kind.localeCompare(b.kind)).map((d) => (
                   <div key={d.id}><div className="mb-1 text-xs font-semibold uppercase muted">{d.kind === 'cv' ? 'CV' : 'Cover letter'} · {d.attempts} attempt{d.attempts > 1 ? 's' : ''}</div><CheckList checks={d.qa_results} />

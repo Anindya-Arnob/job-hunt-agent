@@ -962,6 +962,8 @@ def doc_dict(d: m.Document) -> dict:
             "attempts": d.attempts, "built_at": d.built_at.isoformat(), "cv_version_id": d.cv_version_id,
             "outdated": bool((d.content or {}).get("_outdated")),
             "imported": bool((d.content or {}).get("_imported")),
+            "ats": (d.content or {}).get("_ats"), "projects_used": (d.content or {}).get("_projects") or [],
+            "review": (d.content or {}).get("_review"), "built_with": (d.content or {}).get("_settings"),
             "content": {k: v for k, v in (d.content or {}).items() if not k.startswith("_")}}
 
 
@@ -1002,11 +1004,24 @@ def update_document(doc_id: int, body: ContentIn):
             raise HTTPException(404)
         job = s.get(m.Job, d.job_id)
         docx_path = Path(d.docx_path)
+        old_meta = {}
         if d.kind == "cv":
             cv = CVContent.model_validate(body.content)
             render_cv(cv, prof, style, docx_path)
             pdf = to_pdf(docx_path)
-            checks = qa.check_cv(cv, prof, docx_path, pdf, style)
+            old_meta = {k: v for k, v in (d.content or {}).items() if k.startswith("_")}
+            wanted = len(old_meta.get("_projects") or []) or 3
+            from ..cv.projects import truth_from_meta
+            truth = truth_from_meta(prof, old_meta)
+            checks = qa.check_cv(cv, truth, docx_path, pdf, style, wanted)
+            if old_meta.get("_ats") and job:
+                from ..docs import ats as ATS
+                from ..graphs.build_graph import job_for_writing
+                sc = s.exec(select(m.Score).where(m.Score.job_id == job.id)).first()
+                after = ATS.score(job_for_writing(job, sc), cv, truth)
+                old_meta["_ats"] = {**old_meta["_ats"], "after": after}
+                checks += ATS.screen_checks(job_for_writing(job, sc), cv, truth, truth, after, settings.ats_target,
+                                            old_meta.get("_fact", ""), None)
         else:
             L = LetterContent.model_validate(body.content)
             cv_doc = s.exec(select(m.Document).where(m.Document.job_id == d.job_id, m.Document.kind == "cv")).first()
@@ -1015,7 +1030,7 @@ def update_document(doc_id: int, body: ContentIn):
             pdf = to_pdf(docx_path)
             checks = qa.check_letter(L, prof, pdf, style)
             d.blockers_stated = L.blockers_stated
-        d.content = body.content
+        d.content = {**body.content, **(old_meta if d.kind == "cv" else {})}
         d.pdf_path = str(pdf)
         d.qa_results = [c.as_dict() for c in checks]
         d.qa_passed = qa.passed(checks)
@@ -1506,6 +1521,36 @@ def mail_event_link(event_id: int, body: LinkIn):
 @app.get("/api/settings")
 def get_settings():
     return settings.public_dict()
+
+
+@app.get("/api/claude/extras")
+def claude_extras():
+    """Lean mode, your installed Claude Code plugins and skills, and the tokens of the last calls."""
+    from .. import claude_code
+    out = claude_code.extras()
+    calls = llm.usage_log[-12:]
+    out["recent_calls"] = calls
+    return out
+
+
+@app.get("/api/github/repos")
+def github_repos(refresh: bool = False):
+    """Your GitHub projects as the CV builder sees them."""
+    from ..cv import github as gh
+    main = cvs.get_main()
+    prof = main[0] if main else None
+    try:
+        repos, info = gh.repos(prof, refresh=refresh)
+    except gh.GitHubError as e:
+        return {"user": gh.github_user(prof), "error": str(e), "repos": []}
+    on_cv = []
+    for r in repos:
+        twin = next((p.name for p in (prof.projects if prof else []) if gh.same_project(p, r)), "")
+        item = gh.as_project(r)
+        on_cv.append({"name": item.name, "repo": r.name, "url": r.url, "language": r.language, "topics": r.topics,
+                      "stack": item.stack, "facts": item.bullets, "has_readme": bool(r.readme), "on_cv": twin,
+                      "usable": bool(item.bullets)})
+    return {**info, "repos": on_cv}
 
 
 @app.put("/api/settings")

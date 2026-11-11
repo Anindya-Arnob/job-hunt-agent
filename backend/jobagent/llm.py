@@ -37,7 +37,16 @@ NODE_TIER = {
     "write_cv": "smart",
     "check_cv": "smart",
     "write_letter": "smart",
+    "review_cv": "smart",
 }
+
+# Nodes that follow the model you picked for CV building (Settings → CV building)
+def chosen_model(node: str) -> str:
+    if node in ("write_cv", "check_cv", "review_cv"):
+        return settings.cv_model
+    if node == "write_letter":
+        return settings.letter_model or settings.cv_model
+    return ""
 
 # Estimated USD per million tokens (input, output). Used only for the cost display
 # and the budget cap; check current prices at https://www.anthropic.com/pricing.
@@ -102,8 +111,10 @@ def prompt(name: str) -> str:
 
 
 def model_for(node: str) -> str:
+    from .claude_code import api_model
     tier = NODE_TIER.get(node, "smart")
-    return settings.model_fast if tier == "fast" else settings.model_smart
+    base = settings.model_fast if tier == "fast" else settings.model_smart
+    return api_model(chosen_model(node), base)
 
 
 def _price(model: str) -> tuple[float, float]:
@@ -138,7 +149,7 @@ def _chat(model: str, max_tokens: int):
     return _client_cache[key]
 
 
-CLI_NODES = {"write_cv", "write_letter", "read_mail", "mail_jobs"}      # written by Claude Code when there is no API key
+CLI_NODES = {"write_cv", "write_letter", "review_cv", "read_mail", "mail_jobs"}      # written by Claude Code when there is no API key
 
 
 def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
@@ -146,28 +157,29 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
     import re
     import subprocess
     import tempfile
-    from .feeds.websearch import claude_cli
-    exe = claude_cli()
+    from . import claude_code as cc
+    exe = cc.exe()
     if not exe:
         raise LLMUnavailable("Claude Code not found")
     schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
-    base = (f"{system}\n\n{user}\n\nReturn ONLY one JSON object that validates against this JSON Schema. "
+    tail = (f"Return ONLY one JSON object that validates against this JSON Schema. "
             f"No explanation, no code fence.\nJSON SCHEMA:\n{schema_json}")
-    args = ["-p", "--output-format", "json", "--max-turns", "1",
-            "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,Task"]
-    if settings.websearch_cli_model:
-        args += ["--model", settings.websearch_cli_model]
-    cmd = (["cmd", "/c", exe] if exe.lower().endswith((".cmd", ".bat")) else [exe]) + args
-    prompt, last = base, None
+    effort = settings.cv_effort if node in ("write_cv", "write_letter", "review_cv") else ""
+    last, fix = None, ""
     for attempt in range(2):
         with tempfile.TemporaryDirectory() as cwd:
-            out = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, cwd=cwd, timeout=300)
+            extra, sys_set = cc.flags(Path(cwd), system=system + "\n\n" + tail, no_tools=True,
+                                      model=cc.cli_model(chosen_model(node)), effort=effort)
+            prompt = (f"{user}\n\n{tail}" if sys_set else f"{system}\n\n{user}\n\n{tail}") + fix
+            cmd = cc.prefix(exe) + ["-p", "--output-format", "json", "--max-turns", "1"] + extra
+            out = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, cwd=cwd, timeout=420)
         try:
             env = json.loads(out.stdout.decode("utf-8", "replace"))
         except ValueError:
             raise LLMUnavailable((out.stderr or b"").decode("utf-8", "replace")[-300:] or "Claude Code gave no answer")
         if env.get("is_error"):
             raise LLMUnavailable(str(env.get("result") or env.get("subtype"))[:300])
+        _note_usage(node, env)
         text = env.get("result") or ""
         m_ = re.search(r"\{.*\}", text, re.S)
         try:
@@ -175,14 +187,25 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
         except (ValueError, ValidationError, AttributeError) as e:
             last = e
             log.warning("%s via Claude Code: invalid JSON (attempt %s): %s", node, attempt + 1, str(e)[:200])
-            prompt = base + f"\n\nYour previous answer was not valid for the schema: {str(e)[:500]}. Answer again."
+            fix = f"\n\nYour previous answer was not valid for the schema: {str(e)[:500]}. Answer again."
     raise ValueError(f"{node}: Claude Code did not return valid {schema.__name__}: {last}")
+
+
+usage_log: list[dict] = []          # the last Claude Code calls: node, input/output tokens (Settings shows them)
+
+
+def _note_usage(node: str, env: dict) -> None:
+    u = env.get("usage") or {}
+    inp = (u.get("input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0)
+    usage_log.append({"node": node, "input_tokens": inp, "output_tokens": u.get("output_tokens") or 0,
+                      "lean": settings.claude_lean})
+    del usage_log[:-50]
 
 
 def cli_available() -> bool:
     try:
-        from .feeds.websearch import claude_cli
-        return bool(claude_cli()) and settings.llm_mode != "fake"
+        from .claude_code import exe
+        return bool(exe()) and settings.llm_mode != "fake"
     except Exception:
         return False
 

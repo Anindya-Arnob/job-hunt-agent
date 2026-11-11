@@ -89,7 +89,7 @@ def _swap_wording(text: str, job: JobForWriting) -> str:
     return text
 
 
-def heuristic_cv(job: JobForWriting, prof: CVProfile, level: int = 0) -> CVContent:
+def heuristic_cv(job: JobForWriting, prof: CVProfile, level: int = 0, picked: int = 0, fact: str = "") -> CVContent:
     """level 0..4: higher = shorter (used to fit one page)."""
     terms = job_terms(job)
     # skills: most relevant groups first, relevant items first
@@ -101,10 +101,16 @@ def heuristic_cv(job: JobForWriting, prof: CVProfile, level: int = 0) -> CVConte
     groups.sort(key=lambda t: -t[0])
     n_groups = MAX_SKILL_GROUPS - (1 if level >= 2 else 0) - (1 if level >= 4 else 0)
     skills = [g for _, g in groups[:n_groups]]
-    # projects: most relevant 3-4
-    scored = sorted(prof.projects, key=lambda p: -_relevance(" ".join([p.name] + p.stack + p.bullets), terms))
-    n_proj = 4 if level <= 1 else 3
+    # projects: the picked ones (already in order), or the most relevant 3-4 of the main CV
+    if picked:
+        scored = list(prof.projects)
+        n_proj = int(picked) - (1 if level >= 4 and int(picked) > 3 else 0)
+    else:
+        scored = sorted(prof.projects, key=lambda p: -_relevance(" ".join([p.name] + p.stack + p.bullets), terms))
+        n_proj = 4 if level <= 1 else 3
     per_proj = 2 if level < 3 else (2 if level == 3 else 1)
+    if n_proj >= 5 and level >= 1:
+        per_proj = 1
     projects = []
     for p in scored[:n_proj]:
         ranked = sorted(p.bullets, key=lambda b: (-_relevance(b, terms), len(b.split())))
@@ -121,10 +127,18 @@ def heuristic_cv(job: JobForWriting, prof: CVProfile, level: int = 0) -> CVConte
         exp.append(ExperienceItem(title=e.title, org=e.org, meta=e.meta, dates=e.dates,
                                   stack=e.stack[:8], bullets=[_first_sentence_limit(b, 32 - 3 * min(level, 3)) for b in bullets]))
     summary = _first_sentence_limit(_swap_wording(prof.summary.replace(" — ", ", "), job), 62 - 6 * min(level, 3))
+    summary = re.sub(r"(?<![A-Za-z])(I am|I'm|I have|I)\s+", "", summary)
+    if fact:
+        summary = (summary.rstrip(".") + ". " + fact).strip()
     focus = [t for t in terms if t in ("Machine Learning", "Deep Learning", "NLP", "LLM", "RAG", "Generative AI",
                                        "Data Engineering", "MLOps", "Computer Vision", "Data Science", "Python", "SQL")][:3]
     base = prof.tagline.split("·")[0].strip() if prof.tagline else "Data Science M.Sc. Student"
-    tagline = " · ".join([base] + focus) if focus else prof.tagline
+    from ..docs.ats import core_title
+    role = core_title(job.title)
+    if role and len(role) <= 45:
+        tagline = " · ".join([base, role] + [f for f in focus if f.lower() not in role.lower()][:1])
+    else:
+        tagline = " · ".join([base] + focus) if focus else prof.tagline
     edu = []
     for ed in prof.education:
         e2 = ed.model_copy()
@@ -144,11 +158,32 @@ def _job_block(job: JobForWriting) -> str:
             f"Deal-breakers: {'; '.join(job.deal_breakers)}\n\nDESCRIPTION:\n{job.description[:15000]}")
 
 
-def write_cv(job: JobForWriting, prof: CVProfile, issues: Optional[list[str]] = None, level: int = 0) -> CVContent:
+def system_prompt(name: str) -> str:
+    """The node's prompt, plus the human-writing rules when that switch is on (Settings → CV building)."""
+    from ..config import settings
+    text = llm.prompt(name)
+    if settings.humanize:
+        text += "\n\n" + llm.prompt("humanize")
+    return text
+
+
+def write_cv(job: JobForWriting, prof: CVProfile, issues: Optional[list[str]] = None, level: int = 0,
+             picked: int = 0, fact: str = "") -> CVContent:
+    """picked = how many projects go on the CV; the profile then holds a ranked shortlist to choose from."""
     fix = ("\n\nREVIEWER ISSUES TO FIX (all of them):\n- " + "\n- ".join(issues)) if issues else ""
-    user = f"MAIN CV (only truth):\n{prof.model_dump_json(exclude={'uncertain_fields'})}\n\n{_job_block(job)}{fix}"
-    return llm.structured("write_cv", CVContent, llm.prompt("write_cv"), user,
-                          fake=lambda: heuristic_cv(job, prof, level), max_tokens=6000)
+    extra = ""
+    if picked:
+        extra += (f"\n\nPROJECTS TO USE: exactly {int(picked)} projects, chosen from this ranked shortlist "
+                  f"(best match first; projects from GitHub are described only by their README facts): "
+                  + "; ".join(p.name for p in prof.projects) + ". Pick the ones a recruiter for THIS job cares "
+                  "about most, most relevant first.")
+    if fact:
+        extra += f"\n\nAVAILABILITY (end the summary with this, in your words, keep the numbers): {fact}"
+    from ..docs.ats import core_title
+    extra += f"\n\nTARGET ROLE WORDS for the tagline: {core_title(job.title) or job.title}"
+    user = f"MAIN CV (only truth):\n{prof.model_dump_json(exclude={'uncertain_fields'})}\n\n{_job_block(job)}{extra}{fix}"
+    return llm.structured("write_cv", CVContent, system_prompt("write_cv"), user,
+                          fake=lambda: heuristic_cv(job, prof, level, picked, fact), max_tokens=6000)
 
 
 def check_cv(job: JobForWriting, prof: CVProfile, cv: CVContent) -> CheckResult:
@@ -162,6 +197,20 @@ def check_cv(job: JobForWriting, prof: CVProfile, cv: CVContent) -> CheckResult:
     user = (f"MAIN CV (only truth):\n{prof.model_dump_json(exclude={'uncertain_fields'})}\n\n{_job_block(job)}\n\n"
             f"TAILORED CV:\n{cv.model_dump_json()}")
     return llm.structured("check_cv", CheckResult, llm.prompt("check_cv"), user, fake=fake, max_tokens=2000)
+
+
+# ------------------------------------------------------------------ recruiter review ---
+def review_cv(job: JobForWriting, truth: CVProfile, cv: CVContent, ats_after: dict) -> "ReviewResult":
+    from ..schemas import ReviewResult
+
+    def fake() -> ReviewResult:
+        ko = [d.replace(" (hard)", "") for d in job.deal_breakers if "(hard)" in d]
+        return ReviewResult(verdict="maybe" if ko else "interview", knockouts=ko, fixes=[],
+                            reason="Offline check: no recruiter review without Claude.")
+    user = (f"MAIN CV + PROJECT FACTS (only truth):\n{truth.model_dump_json(exclude={'uncertain_fields'})}\n\n"
+            f"{_job_block(job)}\n\nATS RESULT: score {ats_after.get('score')}, missing keywords: "
+            f"{', '.join(ats_after.get('missing', [])[:15])}\n\nTAILORED CV:\n{cv.model_dump_json()}")
+    return llm.structured("review_cv", ReviewResult, llm.prompt("review_cv"), user, fake=fake, max_tokens=1500)
 
 
 # ------------------------------------------------------------------ letter ---
@@ -253,6 +302,6 @@ def write_letter(job: JobForWriting, prof: CVProfile, cv: CVContent, issues: Opt
             f"Availability sentence to use: \"{availability_line(job.job_type)}\"{fix}")
     if not (job.company or "").strip():
         user += "\n\nThe company name is unknown: write 'your team' instead of a company name."
-    out = llm.structured("write_letter", LetterContent, llm.prompt("write_letter"), user,
+    out = llm.structured("write_letter", LetterContent, system_prompt("write_letter"), user,
                          fake=lambda: heuristic_letter(job, prof, cv), max_tokens=3000)
     return tidy_letter(out, job)

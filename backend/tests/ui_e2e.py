@@ -235,9 +235,9 @@ with sync_playwright() as p:
 
     # 11 settings
     page.locator("aside").get_by_role("link", name=re.compile(r"^Settings(\s|$)")).click()
-    inp = page.locator("input[type=number]").nth(2)
+    inp = page.locator("div.grid", has=page.get_by_text("Verdict: Apply from", exact=True)).locator("input[type=number]")
     inp.fill("68")
-    page.get_by_role("button", name="Save").click()
+    page.get_by_role("button", name="Save").first.click()
     expect(page.get_by_text("Settings saved")).to_be_visible()
     shot(page, "14_settings")
 

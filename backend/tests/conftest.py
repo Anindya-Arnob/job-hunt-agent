@@ -24,6 +24,9 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "websearch_enabled", False)    # tests that need it switch it on with a fake
     from jobagent.feeds import websearch
     monkeypatch.setattr(websearch, "claude_cli", lambda: "")       # never call the real Claude Code in tests
+    from jobagent import claude_code
+    monkeypatch.setattr(claude_code, "exe", lambda: "")
+    monkeypatch.setattr(settings, "github_projects", False)       # tests that need GitHub use a fake
     db.reset_engine()
     llm.reset_cost_tracker()
     db.init_db()

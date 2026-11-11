@@ -79,6 +79,10 @@ flowchart TB
 
 Claude Code is discovered via `CLAUDE_CLI_PATH`, then `PATH`, then the default install locations on Windows (`%USERPROFILE%\.local\bin\claude.exe`, `%APPDATA%\npm\claude.cmd`). It is always run in a temporary working directory with file-editing and shell tools disallowed (`--disallowedTools Bash,Edit,Write,...`), so it can only think and, for the web-search agent, search the web.
 
+**Lean mode** (`claude_code.py`, on by default). A plain `claude -p` call carries Claude Code's own system prompt, every tool definition, your skills, plugins and MCP servers: about 36,000 input tokens before the app says a word. Lean mode passes the node's prompt with `--system-prompt-file`, adds `--disable-slash-commands`, `--strict-mcp-config`, `--no-session-persistence` and disallows every tool, which brings a call down to about 3,000 input tokens. The app reads `claude --help` once and only passes options your Claude Code version knows. With lean mode off, skills can be switched on or off as a group and each installed plugin on its own (written to a temporary `--settings` file as `enabledPlugins`); your own Claude Code settings are never changed. Settings shows the input and output tokens of the last calls.
+
+**Model choice.** `CV_MODEL` / `LETTER_MODEL` (Settings → CV building) pick the model for `write_cv`, `check_cv`, `review_cv` and `write_letter`: `haiku`, `sonnet`, `opus` or `fable` (passed as `--model` to Claude Code, mapped to the API model id with a key), plus `CV_EFFORT` for `--effort`.
+
 Other Claude-powered pieces that call the CLI directly with their own prompt and parser:
 
 - **Web-search agent** (`feeds/websearch.py`): `claude -p --output-format stream-json` with the WebSearch tool, a turn budget of `searches × 2 + 10`, authentication-error detection and salvage of partial results.
@@ -173,15 +177,23 @@ Deal-breakers are stored separately and marked **hard** (e.g. *German C1 require
 flowchart LR
     START --> review{{"review<br/>interrupt(): you pick jobs"}}
     review --> next_job
-    next_job -- "more jobs" --> write_cv --> check_cv --> render_qa
+    next_job -- "more jobs" --> prepare --> write_cv --> check_cv --> render_qa
     next_job -- "done" --> finish --> END
     render_qa -- "QA failed, attempts < 3" --> write_cv
-    render_qa -- "passed or out of attempts" --> write_letter --> letter_qa
+    render_qa -- "passed or out of attempts" --> recruiter
+    recruiter -- "true fixes" --> write_cv
+    recruiter -- "nothing to fix" --> write_letter --> letter_qa
     letter_qa -- "failed, attempts < 3" --> write_letter
     letter_qa --> save --> next_job
 ```
 
 - **`review`** uses LangGraph's `interrupt()`: the run pauses with the candidate list (score ≥ `BUILD_MIN_SCORE`) and resumes with the jobs you ticked. Thanks to the SQLite checkpointer this survives an app restart.
+- **`prepare`** (`cv/projects.py`, `cv/github.py`, `docs/ats.py`): picks the projects and sets the yardsticks for this job.
+  - Your GitHub repositories (`GITHUB_USER`, else the GitHub link on your CV; `JOBHUNT_GITHUB_TOKEN` for private repos) are read through the GitHub API: description, topics, language and README, cached for a day. A repo that is the same project as one on your CV (same link or name) adds its README facts and tools to it; a repo that is not on your CV becomes a project of its own, described only with sentences from its README.
+  - Every candidate is scored by the job terms it shows (required skills x3, keywords and title words x2, other skills x1, README text at half weight). The writer gets a shortlist of `CV_PROJECTS` + 2 and keeps the `CV_PROJECTS` best ones.
+  - Two profiles go into the state: the *writer profile* (your CV with only the shortlist, fewer tokens) and the *truth profile* (your CV plus the README facts and the availability line), which every check accepts and nothing beyond.
+  - The availability line comes from My details: hours per week, enrolment, start date and work permit.
+  - The **ATS score before**: your main CV against this job.
 - **`write_cv`**: Claude rewrites your main CV for the job (tagline, summary, skill order, which projects and bullets to show), producing a `CVContent` object. Prompt: `prompts/write_cv.md`.
 - **`check_cv`**: an honesty checker compares the draft with the main CV: every tool, number, employer and date must exist there.
 - **`render_qa`** (`docs/render.py`, `docs/pdf.py`, `docs/qa.py`): the content is rendered with python-docx **into your own Word layout** (colours, fonts and header band extracted from your uploaded CV), converted to PDF (LibreOffice headless, or Microsoft Word through `docx2pdf` on Windows) and checked:
@@ -190,10 +202,26 @@ flowchart LR
   - only tools from your main CV
   - only numbers from your main CV
   - at most one em dash
-  - at least 3 projects
+  - at least 3 projects (and the number you chose, as a tip)
   - headings 10 pt, body 9 pt
 
+  Then the **ATS score after** and the recruiter-screen checks (`docs/ats.py`):
+
+  | Part | Points | What counts |
+  |---|---|---|
+  | Keywords | 45 | the posting's required skills (x3), keywords (x2) and other named skills (x1) as exact words, singular or plural |
+  | Up front | 15 | the same keywords in the tagline, summary or skills |
+  | Job title | 10 | the title's words (without Werkstudent, m/w/d, city) in the CV |
+  | Sections | 10 | Summary, Skills, Experience, Projects, Education, Languages |
+  | Contact | 10 | email, phone, location, LinkedIn |
+  | Numbers | 5 | at least 30% of bullets show a result with a number |
+  | Languages | 5 | languages the posting names are listed |
+
+  Checks that force a rewrite: the job title's words in the headline, no "I"/"my", no weak bullet openings ("Responsible for", "Worked on"), the availability line for Werkstudent jobs, no keyword your main CV had is lost, and an ATS score of at least `ATS_TARGET` when the missing words are skills you really have. Tips (shown, never forcing a rewrite): varied bullet openings, the PDF text readable by an ATS, results with numbers, knock-out requirements such as German C1.
+
   Failures go back to the writer with the concrete issues, at most `MAX_BUILD_ATTEMPTS` times; anything still failing is saved but flagged.
+- **`recruiter`** (`prompts/review_cv.md`, on with `RECRUITER_REVIEW`): one call reads the finished CV like a recruiter. It returns a verdict (interview / maybe / reject), a reason, up to five fixes that are true to your background, and the knock-outs the CV cannot fix. Fixes go back to the writer once. The result, the ATS scores and the project sources are saved with the document and shown on the Documents screen.
+- **Human-sounding writing** (`HUMANIZE`, on by default) adds `prompts/humanize.md` to the CV and letter prompts: plain verbs, no hype words, no em dashes, no morals, no "I am excited to apply". It works without any Claude Code plugin.
 - **`write_letter`** (`prompts/write_letter.md`, `steps/write.py`): a complete letter of 4 to 5 paragraphs and 330 to 420 words, in the language of the ad. It ties two or three real projects to named requirements, says plainly what is missing, and follows human-writing rules (no "passionate", "perfect fit", "leverage"; varied sentences; no lists). `tidy_letter` removes gender tags like *(m/w/d)*, empty "at ." gaps and em dashes.
 - **`save`**: one CV and one letter per job, both `.docx` and `.pdf`, in `<JOB_DIR>/Claude CV/<Company>/`. Older versions are moved to `_old_versions/` rather than deleted, and `sync_docs.py` keeps the database in step with what is actually on disk.
 
@@ -332,7 +360,7 @@ Rules enforced in code, not just in prompts:
 
 ## 13. Testing
 
-`backend/tests/` (118 pytest tests) run without network access or real Claude:
+`backend/tests/` (130+ pytest tests) run without network access or real Claude:
 
 - **Fakes**: Claude in offline mode, a local fake job site with listings, Cloudflare-style checks and application forms (`fake_apply.py`), and a fake IMAP server.
 - **Coverage**:
@@ -342,6 +370,7 @@ Rules enforced in code, not just in prompts:
   - CV parsing round-trips and versions
   - field decisions (salary units, saved answers, security checks, phone precedence)
   - mail sorting on real-world sample wording, inbox ordering, password redaction
+  - CV options: lean Claude Code command lines (and old versions without the newer options), model choice, plugin switches, the GitHub reader with a fake API, the project shortlist, ATS scoring and the recruiter-screen checks, a whole build with a GitHub-only project
 - **End to end**:
   - `test_20_extension.py` loads the real extension in Chromium and fills forms (React-safe setters, uploads, no overwriting, restart persistence, `maxlength`, no scroll jumps, no false "applied")
   - `ui_e2e.py` drives the whole web app with Playwright: upload a CV, search, review, build, apply and inbox screens

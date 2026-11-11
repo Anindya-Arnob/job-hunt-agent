@@ -78,3 +78,23 @@ def norm_tool(s: str) -> str:
     s = s.lower().strip()
     s = re.sub(r"\(.*?\)", "", s)
     return re.sub(r"[^a-z0-9+#]+", "", s)
+
+
+_SHORT_CTX = re.compile(r"(?= (language|lang|code|programming|developer|scripts?|packages?|studio|\d))", re.I)
+
+
+def find_terms_strict(text: str, terms=None) -> list[str]:
+    """find_terms, but short names (R, Go, C, Rust...) only count when written with their capital and,
+    for the one- and two-letter ones, used like a language ("R scripts", "Go code", "C++")."""
+    text = text or ""
+    out = []
+    for t in find_terms(text, terms):
+        if len(t) <= 4 and not re.search(rf"(?<![A-Za-z0-9+#]){re.escape(t)}(?![A-Za-z0-9+#])", text):
+            continue                                   # 'go' / 'r' in normal words
+        if len(t) <= 2 and t.isalpha():
+            ok = any(_SHORT_CTX.match(text, m.end()) or re.search(r"(,|/|und|and)\s*$", text[max(0, m.start() - 6):m.start()])
+                     for m in re.finditer(rf"(?<![A-Za-z0-9+#]){re.escape(t)}(?![A-Za-z0-9+#])", text))
+            if not ok:
+                continue
+        out.append(t)
+    return out

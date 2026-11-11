@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Save } from 'lucide-react'
 import { api } from '../api'
 import { useAsync, useToast } from '../ui'
+import BuildOptions, { BUILD_KEYS, ClaudeExtras } from '../components/BuildOptions'
 
 const Row = ({ label, help, children }) => (
   <div className="grid grid-cols-3 items-start gap-4 border-b border-slate-100 py-3 last:border-0"><div><div className="font-medium">{label}</div>{help && <div className="text-xs muted">{help}</div>}</div><div className="col-span-2">{children}</div></div>)
@@ -13,9 +14,14 @@ export default function Settings() {
   useEffect(() => { if (data) setF(data) }, [data])
   if (!f) return <div className="muted">Loading…</div>
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
-  const save = async () => { try { setF(await api.put('/api/settings', f)); toast('Settings saved') } catch (e) { toast(e.message, 'error') } }
+  const save = async () => {
+    try {
+      const body = Object.fromEntries(Object.entries(f).filter(([k]) => !BUILD_KEYS.includes(k)))   // the cards below save their own
+      setF(await api.put('/api/settings', body)); toast('Settings saved')
+    } catch (e) { toast(e.message, 'error') }
+  }
   return (
-    <div className="max-w-3xl space-y-5">
+    <div className="max-w-5xl space-y-5">
       <div className="flex items-center justify-between"><h1 className="h1">Settings</h1><button className="btn-teal" onClick={save}><Save size={14} />Save</button></div>
       <div className="card px-4">
         <Row label="AI mode" help={f.has_api_key ? 'API key found in .env' : 'No ANTHROPIC_API_KEY in .env – offline mode only'}>
@@ -23,9 +29,11 @@ export default function Settings() {
             <option value="">Automatic ({f.has_api_key ? 'Claude API' : 'offline'})</option><option value="anthropic">Claude API</option><option value="fake">Offline (no AI, heuristics only)</option></select>
           <div className="mt-1 text-xs muted">Currently: <b>{f.effective_llm_mode === 'fake' ? 'offline' : 'Claude API'}</b></div></Row>
         <Row label="Fast model" help="Page reading, classification"><input className="input" value={f.model_fast} onChange={set('model_fast')} /></Row>
-        <Row label="Smart model" help="Scoring, CV writing, checking, letters"><input className="input" value={f.model_smart} onChange={set('model_smart')} /></Row>
+        <Row label="Smart model" help="Scoring and checks with an API key. The CV and letter model is under CV building."><input className="input" value={f.model_smart} onChange={set('model_smart')} /></Row>
         <Row label="Daily budget (USD)" help="Runs stop before going over"><input type="number" step="0.5" className="input w-32" value={f.daily_budget_usd} onChange={set('daily_budget_usd')} /></Row>
       </div>
+      <BuildOptions />
+      <ClaudeExtras />
       <div className="card px-4">
         <Row label="Verdict: Skip below"><input type="number" className="input w-32" value={f.verdict_skip_below} onChange={set('verdict_skip_below')} /></Row>
         <Row label="Verdict: Apply from" help="Between the two = Apply after CV tailoring"><input type="number" className="input w-32" value={f.verdict_apply_from} onChange={set('verdict_apply_from')} /></Row>

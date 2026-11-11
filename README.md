@@ -48,7 +48,7 @@ Every job is classified (internship / working student / part-time / full-time) a
 <td width="33%" valign="top">
 
 ### 📝 Writes tailored documents
-For the jobs you tick, it writes a **one-page CV** and a **cover letter** in your own Word layout. Claude rewrites; a checker and automatic QA reject anything not backed by your main CV (no invented tools, numbers or employers).
+For the jobs you tick, it writes a **one-page CV** and a **cover letter** in your own Word layout. It picks the projects closest to the job from your CV **and your GitHub**, shows the **ATS score before and after**, and runs a recruiter-style review. A checker and automatic QA reject anything not backed by your CV or your own READMEs. You choose the model (Haiku, Sonnet, Opus, Fable) and how many projects.
 
 </td>
 </tr>
@@ -236,6 +236,12 @@ All settings live in `.env` (copied from [`.env.example`](.env.example)); most c
 | `JOB_DIR` | `Documents/JobHunt` | Where CVs, letters and Excel exports are written |
 | `VERDICT_SKIP_BELOW` / `VERDICT_APPLY_FROM` | `40` / `65` | Score thresholds for *Skip* / *Apply after tailoring* / *Apply* |
 | `BUILD_MIN_SCORE` | `40` | Jobs below this are never built |
+| `CV_MODEL` / `LETTER_MODEL` / `CV_EFFORT` | Sonnet | Model and effort for the CV and the letter (`haiku`, `sonnet`, `opus`, `fable`) |
+| `CV_PROJECTS` | `3` | Projects on each CV (2–6) |
+| `GITHUB_PROJECTS` / `GITHUB_USER` | on / your CV's link | Pick projects from your GitHub READMEs too |
+| `ATS_TARGET` | `75` | Below this the writer adds the posting's exact words for skills you have |
+| `RECRUITER_REVIEW` / `HUMANIZE` | on / on | Recruiter-style review pass; human-writing rules |
+| `CLAUDE_LEAN` | on | Lean Claude Code calls (about 3k instead of 36k input tokens) |
 | `APPLY_DAILY_LIMIT` | `20` | Daily application goal on the Apply page and dashboard |
 | `PAGE_DELAY_SECONDS` / `MAX_PAGES_PER_SEARCH` | `3` / `3` | Human pacing for the browser agents |
 | `SCHEDULE_ENABLED` / `SCHEDULE_TIME` | `false` / `07:10` | Morning search + score (while the app is open) |
@@ -265,7 +271,7 @@ All settings live in `.env` (copied from [`.env.example`](.env.example)); most c
 | Mail | IMAP (read-only, `BODY.PEEK`), rule-based + Claude classification |
 | Frontend | **React 18**, Vite, **Tailwind CSS** with a CSS-variable theme (dark glass / light frost), AG Grid, Inter |
 | Extension | Chrome / Edge **Manifest V3** (service worker + content script) |
-| Tests | **pytest** (118 tests), Playwright end-to-end UI test, extension end-to-end test |
+| Tests | **pytest** (130+ tests), Playwright end-to-end UI test, extension end-to-end test |
 
 ---
 

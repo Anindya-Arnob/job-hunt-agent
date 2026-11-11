@@ -52,6 +52,15 @@ class BuildState(TypedDict, total=False):
     tmp_dir: str
     results: Annotated[list, operator.add]
     report_path: str
+    wprof: Optional[dict]          # your CV with only the picked projects (what the writer sees)
+    tprof: Optional[dict]          # your CV + facts of the picked GitHub projects (what the checks accept)
+    picked: list
+    proj_info: dict
+    fact: str
+    ats_before: dict
+    ats_after: dict
+    review: Optional[dict]
+    reviewed: bool
 
 
 # ---------------------------------------------------------------- helpers ---
@@ -140,6 +149,25 @@ def _profile(state) -> tuple[CVProfile, int]:
     return got
 
 
+def _truth(state) -> CVProfile:
+    return CVProfile.model_validate(state["tprof"]) if state.get("tprof") else _profile(state)[0]
+
+
+def _writer(state) -> CVProfile:
+    return CVProfile.model_validate(state["wprof"]) if state.get("wprof") else _profile(state)[0]
+
+
+def _jw(state, job: m.Job, sc) -> JobForWriting:
+    """The job for the writers. A 'missing' skill that your picked GitHub project shows is not missing."""
+    jw = job_for_writing(job, sc)
+    if state.get("tprof"):
+        from ..docs.ats import hit
+        from ..steps.score import profile_text
+        have = profile_text(_truth(state))
+        jw.missing_skills = [t for t in jw.missing_skills if not hit(t, have)]
+    return jw
+
+
 def _emit(state, msg, **kw):
     events.emit({"type": "build", "message": msg, "job_id": state.get("current"), **kw}, run_id=state.get("run_id"))
 
@@ -190,7 +218,7 @@ def _remember_level(state, level: int) -> None:
 
 
 # ------------------------------------------------------------------ nodes ---
-def review(state: BuildState) -> dict:
+def review_jobs(state: BuildState) -> dict:
     ids = state.get("job_ids")
     if not ids:
         cands = candidates()
@@ -230,27 +258,57 @@ def next_job(state: BuildState) -> dict:
 
 
 def route_next(state: BuildState) -> str:
-    return "write_cv" if state.get("current") else "finish"
+    return "prepare" if state.get("current") else "finish"
+
+
+def prepare(state: BuildState) -> dict:
+    """Pick the projects (main CV + GitHub), the availability line and the 'before' ATS score."""
+    from ..cv import projects as P
+    from ..docs import ats
+    prof, _ = _profile(state)
+    job, sc = _load(state["current"])
+    jw = job_for_writing(job, sc)
+    picked, info = P.pick(jw, prof)          # a shortlist: what you asked for plus two spares
+    gi = info.get("github") or {}
+    if gi.get("error"):
+        _emit(state, f"GitHub: {gi['error']} - using the projects on your CV")
+    _emit(state, f"Project shortlist (best {info.get('want')} go on the CV): " + "; ".join(f"{x.item.name} ({'GitHub' if x.source == 'github' else 'CV + GitHub' if x.source == 'cv+github' else 'CV'})"
+                                          for x in picked))
+    fact = ats.availability_fact(job.job_type) if settings.state_availability else ""
+    w = P.writer_profile(prof, picked)
+    t = P.truth_profile(prof, picked)
+    if fact:
+        t.summary = (t.summary + " " + fact).strip()      # its numbers (hours, year) are allowed in the CV
+    before = ats.score(jw, prof, prof)
+    _emit(state, f"ATS score of your main CV for this job: {before['score']}")
+    return {"wprof": w.model_dump(), "tprof": t.model_dump(), "picked": [x.as_dict() for x in picked],
+            "proj_info": info, "fact": fact, "ats_before": before, "ats_after": {}, "review": None, "reviewed": False}
 
 
 def write_cv(state: BuildState) -> dict:
     llm.set_current_run(state["run_id"])
-    prof, _ = _profile(state)
+    prof = _writer(state)
     job, sc = _load(state["current"])
-    cv = W.write_cv(job_for_writing(job, sc), prof, state.get("issues") or None, level=state.get("level", 0))
+    cv = W.write_cv(_jw(state, job, sc), prof, state.get("issues") or None, level=state.get("level", 0),
+                    picked=(state.get("proj_info") or {}).get("want", 0) if state.get("wprof") else 0,
+                    fact=state.get("fact", ""))
     cv = W.limit_em_dashes(cv)
     return {"cv": cv.model_dump(), "attempts": state.get("attempts", 0) + 1}
 
 
 def check_cv(state: BuildState) -> dict:
-    prof, _ = _profile(state)
+    prof = _truth(state)
     job, sc = _load(state["current"])
-    res = W.check_cv(job_for_writing(job, sc), prof, CVContent.model_validate(state["cv"]))
+    res = W.check_cv(_jw(state, job, sc), prof, CVContent.model_validate(state["cv"]))
     return {"issues": res.issues if not res.passed else []}
 
 
 def render_qa(state: BuildState) -> dict:
-    prof, _ = _profile(state)
+    from ..docs import ats
+    prof = _truth(state)
+    job, sc = _load(state["current"])
+    jw = _jw(state, job, sc)
+    wanted = (state.get("proj_info") or {}).get("want") or 3
     style = cvs.active_style()
     cv = CVContent.model_validate(state["cv"])
     tmp = Path(state["tmp_dir"]) / f"job{state['current']}"
@@ -262,41 +320,79 @@ def render_qa(state: BuildState) -> dict:
             pdf = to_pdf(d)
         except PdfUnavailable as e:
             pdf = None
-            checks = qa.check_cv(cv, prof, d, None, style) + [qa.Check("PDF created", False, str(e))]
+            checks = qa.check_cv(cv, prof, d, None, style, wanted) + [qa.Check("PDF created", False, str(e))]
             break
-        checks = qa.check_cv(cv, prof, d, pdf, style)
+        checks = qa.check_cv(cv, prof, d, pdf, style, wanted)
         one_page = next((c for c in checks if c.name == "Exactly 1 page"), None)
         if one_page is None or one_page.passed:
             break
+    after = ats.score(jw, cv, prof)
+    pdf_text = None
+    if pdf is not None:
+        try:
+            from pypdf import PdfReader
+            pdf_text = "\n".join((pg.extract_text() or "") for pg in PdfReader(str(pdf)).pages)
+        except Exception:
+            pdf_text = None
+    checks += ats.screen_checks(jw, cv, prof, prof, after, settings.ats_target, state.get("fact", ""), pdf_text,
+                                state.get("ats_before"))
     issues = list(state.get("issues", [])) + qa.issues(checks)
     level = state.get("level", 0)
     if any(c.name == "Exactly 1 page" and not c.passed for c in checks):
         level += 1
     _emit(state, f"CV attempt {state.get('attempts', 1)}: " + ("all checks passed" if not issues else
-                 "; ".join(_short_issue(c) for c in checks if not c.passed) or "; ".join(issues)[:200])
+                 "; ".join(_short_issue(c) for c in checks if not c.passed and not c.soft) or "; ".join(issues)[:200])
           + ("" if not issues or state.get("attempts", 1) >= settings.max_build_attempts else " – rewriting"))
-    return {"qa_cv": [c.as_dict() for c in checks], "issues": issues, "level": level}
+    _emit(state, f"ATS score: {state.get('ats_before', {}).get('score', '?')} → {after['score']}")
+    return {"qa_cv": [c.as_dict() for c in checks], "issues": issues, "level": level, "ats_after": after}
 
 
 def route_cv(state: BuildState) -> str:
+    nxt = "review" if settings.recruiter_review and not state.get("reviewed") else "write_letter"
     if not state.get("issues"):
-        return "write_letter"
+        return nxt
     if state.get("attempts", 0) >= settings.max_build_attempts:
-        return "write_letter"     # saved but flagged "needs your attention"
+        return nxt                # saved but flagged "needs your attention"
     return "write_cv"
+
+
+def review(state: BuildState) -> dict:
+    """A recruiter's look at the finished CV: what would get it rejected, and the true fixes."""
+    llm.set_current_run(state["run_id"])
+    job, sc = _load(state["current"])
+    try:
+        r = W.review_cv(_jw(state, job, sc), _truth(state), CVContent.model_validate(state["cv"]),
+                        state.get("ats_after") or {})
+    except Exception as e:                       # the review is extra: never fail a build on it
+        log.warning("recruiter review failed: %s", e)
+        return {"reviewed": True}
+    msg = f"Recruiter review: {r.verdict}" + (f" - {r.reason}" if r.reason else "")
+    if r.knockouts:
+        msg += " | Knock-out: " + "; ".join(r.knockouts[:3])
+    _emit(state, msg)
+    out = {"reviewed": True, "review": r.model_dump()}
+    if r.fixes and r.verdict != "interview":
+        _emit(state, "Applying the reviewer's fixes: " + "; ".join(r.fixes[:5]))
+        out["issues"] = list(r.fixes[:5])
+    return out
+
+
+def route_review(state: BuildState) -> str:
+    r = state.get("review") or {}
+    return "write_cv" if r.get("fixes") and r.get("verdict") != "interview" and state.get("issues") else "write_letter"
 
 
 def write_letter(state: BuildState) -> dict:
     llm.set_current_run(state["run_id"])
-    prof, _ = _profile(state)
+    prof = _truth(state)
     job, sc = _load(state["current"])
     issues = [c["detail"] or c["name"] for c in state.get("qa_letter", []) if not c["passed"]]
-    L = W.write_letter(job_for_writing(job, sc), prof, CVContent.model_validate(state["cv"]), issues or None)
+    L = W.write_letter(_jw(state, job, sc), prof, CVContent.model_validate(state["cv"]), issues or None)
     return {"letter": L.model_dump(), "letter_attempts": state.get("letter_attempts", 0) + 1}
 
 
 def letter_qa(state: BuildState) -> dict:
-    prof, _ = _profile(state)
+    prof = _truth(state)
     style = cvs.active_style()
     job, _ = _load(state["current"])
     L = LetterContent.model_validate(state["letter"])
@@ -316,6 +412,14 @@ def route_letter(state: BuildState) -> str:
     return "save" if ok or state.get("letter_attempts", 0) >= 2 else "write_letter"
 
 
+def used_projects(state) -> list[dict]:
+    """The shortlist entries that ended up on the CV, in CV order (sources for the screen)."""
+    by = {d["name"]: d for d in state.get("picked") or []}
+    out = [by[p["name"]] for p in (state.get("cv") or {}).get("projects", []) if p["name"] in by]
+    names = {d["name"] for d in out}
+    return out + [{**d, "unused": True} for d in state.get("picked") or [] if d["name"] not in names and d.get("item")]
+
+
 def save(state: BuildState) -> dict:
     jid = state["current"]
     job, sc = _load(jid)
@@ -331,8 +435,14 @@ def save(state: BuildState) -> dict:
                 dst = folder / f"{base}{ext}"
                 shutil.copy2(src, dst)
                 files[f"{kind}{ext}"] = str(dst)
-    cv_ok = all(c["passed"] for c in state.get("qa_cv", []))
-    letter_ok = all(c["passed"] for c in state.get("qa_letter", []))
+    cv_ok = qa.passed_dicts(state.get("qa_cv", []))
+    letter_ok = qa.passed_dicts(state.get("qa_letter", []))
+    meta = {"_ats": {"before": state.get("ats_before") or {}, "after": state.get("ats_after") or {},
+                     "target": settings.ats_target},
+            "_projects": used_projects(state), "_review": state.get("review") or None,
+            "_fact": state.get("fact", ""),
+            "_settings": {"model": settings.cv_model or "default", "projects": settings.cv_projects,
+                          "github": settings.github_projects, "lean": settings.claude_lean}}
     L = LetterContent.model_validate(state["letter"])
     with db.session_scope() as s:
         keep = set(files.values())
@@ -342,7 +452,7 @@ def save(state: BuildState) -> dict:
                     retire_file(Path(p))            # an earlier version of this job's CV/letter
             s.delete(old)
         s.add(m.Document(job_id=jid, cv_version_id=vid, kind="cv", docx_path=files.get("cv.docx", ""),
-                         pdf_path=files.get("cv.pdf", ""), content=state["cv"], qa_results=state.get("qa_cv", []),
+                         pdf_path=files.get("cv.pdf", ""), content={**state["cv"], **meta}, qa_results=state.get("qa_cv", []),
                          qa_passed=cv_ok, attempts=state.get("attempts", 1)))
         s.add(m.Document(job_id=jid, cv_version_id=vid, kind="letter", docx_path=files.get("letter.docx", ""),
                          pdf_path=files.get("letter.pdf", ""), content=state["letter"],
@@ -356,13 +466,15 @@ def save(state: BuildState) -> dict:
         _remember_level(state, state.get("level", 0))
     status = "built" if cv_ok and letter_ok else "built - needs your attention"
     failed = [c["name"] + (f" ({c['detail']})" if c["detail"] else "") for c in state.get("qa_cv", []) + state.get("qa_letter", [])
-              if not c["passed"]]
+              if not c["passed"] and not c.get("soft")]
     _emit(state, f"Saved {Path(files.get('cv.pdf', files.get('cv.docx', ''))).name}" + (f" - check: {'; '.join(failed)}" if failed else ""))
     return {"results": [{"job_id": jid, "status": status, "folder": str(folder),
                          "cv_file": Path(files.get("cv.docx", "")).name,
                          "letter_file": Path(files.get("letter.docx", "")).name,
                          "blockers": L.blockers_stated, "failed_checks": failed,
-                         "projects": [p["name"] for p in state["cv"]["projects"]]}],
+                         "projects": [p["name"] for p in state["cv"]["projects"]],
+                         "ats_before": (state.get("ats_before") or {}).get("score"),
+                         "ats_after": (state.get("ats_after") or {}).get("score")}],
             "current": None}
 
 
@@ -435,16 +547,18 @@ def _set_run(run_id: int, **fields) -> None:
 
 def build_graph(checkpointer=None):
     g = StateGraph(BuildState)
-    for name, fn in (("review", review), ("next_job", next_job), ("write_cv", write_cv), ("check_cv", check_cv),
-                     ("render_qa", render_qa), ("write_letter", write_letter), ("letter_qa", letter_qa),
-                     ("save", save), ("finish", finish)):
+    for name, fn in (("review", review_jobs), ("next_job", next_job), ("prepare", prepare), ("write_cv", write_cv),
+                     ("check_cv", check_cv), ("render_qa", render_qa), ("recruiter", review),
+                     ("write_letter", write_letter), ("letter_qa", letter_qa), ("save", save), ("finish", finish)):
         g.add_node(name, fn)
     g.add_edge(START, "review")
     g.add_edge("review", "next_job")
-    g.add_conditional_edges("next_job", route_next, ["write_cv", "finish"])
+    g.add_conditional_edges("next_job", route_next, ["prepare", "finish"])
+    g.add_edge("prepare", "write_cv")
     g.add_edge("write_cv", "check_cv")
     g.add_edge("check_cv", "render_qa")
-    g.add_conditional_edges("render_qa", route_cv, ["write_cv", "write_letter"])
+    g.add_conditional_edges("render_qa", route_cv, {"write_cv": "write_cv", "review": "recruiter", "write_letter": "write_letter"})
+    g.add_conditional_edges("recruiter", route_review, ["write_cv", "write_letter"])
     g.add_edge("write_letter", "letter_qa")
     g.add_conditional_edges("letter_qa", route_letter, ["write_letter", "save"])
     g.add_edge("save", "next_job")

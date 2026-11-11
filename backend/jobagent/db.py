@@ -104,11 +104,20 @@ def load_setting_overrides() -> None:
 
 
 def save_settings(values: dict) -> None:
+    clean = {}
     with session_scope() as s:
         for key, value in values.items():
             if key not in settings.EDITABLE:
                 continue
+            if key in settings.SECRET:
+                if value in ("", None, "********"):
+                    continue                     # not shown on screen: empty means "keep"
+                if value == "__clear__":
+                    value = ""
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value)        # e.g. the plugin switches
+            clean[key] = value
             row = s.get(m.AppSetting, key) or m.AppSetting(key=key)
             row.value = json.dumps(value)
             s.add(row)
-    settings.apply_overrides(values)
+    settings.apply_overrides(clean)

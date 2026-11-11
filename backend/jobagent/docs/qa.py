@@ -63,9 +63,10 @@ class Check:
     name: str
     passed: bool
     detail: str = ""
+    soft: bool = False          # shown as a warning; never forces a rewrite or "needs your attention"
 
     def as_dict(self):
-        return {"name": self.name, "passed": self.passed, "detail": self.detail}
+        return {"name": self.name, "passed": self.passed, "detail": self.detail, "soft": self.soft}
 
 
 def page_count(pdf: Path) -> int:
@@ -169,7 +170,8 @@ def docx_font_sizes(docx_path: Path) -> set[int]:
     return {int(x) for x in re.findall(r'<w:sz w:val="(\d+)"', xml)}
 
 
-def check_cv(content: CVContent, prof: CVProfile, docx: Path, pdf: Optional[Path], style: dict) -> list[Check]:
+def check_cv(content: CVContent, prof: CVProfile, docx: Path, pdf: Optional[Path], style: dict,
+             projects_wanted: int = 3) -> list[Check]:
     checks = []
     if pdf is not None:
         pages = page_count(pdf)
@@ -183,7 +185,12 @@ def check_cv(content: CVContent, prof: CVProfile, docx: Path, pdf: Optional[Path
     checks.append(Check("Only numbers from your main CV", not nums, ", ".join(nums[:10])))
     dashes = all_text_cv(content).count("—")
     checks.append(Check("At most one em dash", dashes <= 1, f"{dashes} em dashes" if dashes > 1 else ""))
-    checks.append(Check("At least 3 projects", len(content.projects) >= 3, f"{len(content.projects)} projects"))
+    least = min(3, projects_wanted)
+    n = len(content.projects)
+    checks.append(Check(f"At least {least} projects", n >= least, f"{n} projects"))
+    if projects_wanted != least or n > least:
+        checks.append(Check(f"{projects_wanted} projects as you chose", n == projects_wanted,
+                            "" if n == projects_wanted else f"{n} fit on one page", soft=True))
     sizes = docx_font_sizes(docx)
     want = {int(style["heading_pt"] * 2), int(style["body_pt"] * 2)}
     checks.append(Check("Headings 10 pt, body 9 pt", want <= sizes, ""))
@@ -206,13 +213,17 @@ def check_letter(letter: LetterContent, prof: CVProfile, pdf: Optional[Path], st
 
 
 def passed(checks: list[Check]) -> bool:
-    return all(c.passed for c in checks)
+    return all(c.passed or c.soft for c in checks)
+
+
+def passed_dicts(checks: list[dict]) -> bool:
+    return all(c.get("passed") or c.get("soft") for c in checks)
 
 
 def issues(checks: list[Check]) -> list[str]:
     out = []
     for c in checks:
-        if c.passed:
+        if c.passed or c.soft:
             continue
         if c.name == "Exactly 1 page":
             out.append(f"The CV is too long ({c.detail}). Cut that many lines: fewer/shorter bullets, fewer skill items.")
@@ -220,6 +231,8 @@ def issues(checks: list[Check]) -> list[str]:
             out.append(f"Remove tools not in the main CV: {c.detail}.")
         elif c.name.startswith("Only numbers"):
             out.append(f"Remove numbers not in the main CV: {c.detail}.")
+        elif c.name.startswith("Keeps the keywords"):
+            out.append(f"Your main CV matched these words of the posting and the tailored CV lost them; {c.detail}.")
         elif c.name.startswith("At most one em dash"):
             out.append("Use at most one em dash (—) in the whole CV.")
         else:

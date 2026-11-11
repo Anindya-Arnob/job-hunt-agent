@@ -101,9 +101,9 @@ def test_failed_checks_retry_then_flag(setup, monkeypatch):
     calls = {"n": 0}
     real = W.write_cv
 
-    def bad_writer(job, prof, issues=None, level=0):
+    def bad_writer(job, prof, issues=None, level=0, **kw):
         calls["n"] += 1
-        cv = real(job, prof, issues, level)
+        cv = real(job, prof, issues, level, **kw)
         cv.skills[0].items.append("Kubernetes")     # a tool you don't have
         return cv
     monkeypatch.setattr(W, "write_cv", bad_writer)

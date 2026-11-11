@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import tempfile
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Awaitable, Callable, Optional
@@ -161,12 +162,8 @@ def engine() -> str:
 
 
 def claude_cli() -> str:
-    exe = settings.claude_cli_path or shutil.which("claude") or ""
-    if not exe and os.name == "nt":
-        for p in (os.path.expandvars(r"%APPDATA%\npm\claude.cmd"), os.path.expanduser(r"~\.local\bin\claude.exe")):
-            if os.path.exists(p):
-                return p
-    return exe
+    from ..claude_code import exe
+    return exe()
 
 
 def _extract_json(text: str) -> list[dict]:
@@ -219,12 +216,12 @@ async def _call_cli(prompt: str, q: WebQuery) -> tuple[str, set[str], int, float
     exe = claude_cli()
     if not exe:
         raise WebSearchUnavailable("Claude Code (claude) is not installed or not on PATH")
+    from .. import claude_code as cc
     args = ["-p", "--output-format", "stream-json", "--verbose", "--allowedTools", "WebSearch",
             "--max-turns", str(settings.websearch_searches_per_call * 2 + 10)]
-    if settings.websearch_cli_model:
-        args += ["--model", settings.websearch_cli_model]
-    cmd = (["cmd", "/c", exe] if exe.lower().endswith((".cmd", ".bat")) else [exe]) + args
     with tempfile.TemporaryDirectory() as cwd:          # empty folder: no project files are read
+        extra, _ = cc.flags(Path(cwd), system=None, no_tools=False, model=cc.cli_model(""))
+        cmd = cc.prefix(exe) + args + extra
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=cwd, stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
