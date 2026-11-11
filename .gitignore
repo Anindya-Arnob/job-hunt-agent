@@ -1,0 +1,22 @@
+# your data - never commit
+.env
+data/
+backend/data/
+sample_job_dir/**/*
+!sample_job_dir/**/
+!sample_job_dir/**/.gitkeep
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# frontend (the built app in frontend/dist IS committed, so no Node.js is needed to run it)
+frontend/node_modules/
+
+# os / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

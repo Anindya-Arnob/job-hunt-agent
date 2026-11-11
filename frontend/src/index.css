@@ -1,0 +1,140 @@
+@import '@fontsource-variable/inter';
+@import './theme-tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ theme (non-colour) ---
+   Dark glass is the default (the reference look); <html data-theme="light"> switches to frosted light. */
+:root {
+  color-scheme: dark;
+  --app-base: #05070b;
+  --glass-border: rgb(255 255 255 / 0.085);
+  --glass-hi: 0.07;            /* top inner highlight of a glass panel */
+  --glass-shadow: 0.55;
+  --glass-blur: 22px;
+  --orb-amber: radial-gradient(circle at 35% 35%, #f6b75a 0%, #d98a28 38%, #8a4a12 70%, rgba(80, 40, 10, 0) 72%);
+  --glow-blue: rgb(37 99 235 / 0.55);
+  --glow-teal: rgb(20 184 166 / 0.42);
+  --glow-cyan: rgb(34 211 238 / 0.32);
+  --glow-green: rgb(16 185 129 / 0.22);
+  --scroll-thumb: rgb(255 255 255 / 0.14);
+  --grid-bg: rgb(13 16 23 / 0.94);
+  --tooltip-bg: rgb(30 35 48);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --app-base: #eef1f6;
+  --glass-border: rgb(255 255 255 / 0.75);
+  --glass-hi: 0.9;
+  --glass-shadow: 0.16;
+  --orb-amber: radial-gradient(circle at 35% 35%, #ffd9a6 0%, #f5b067 40%, #e98e3f 68%, rgba(233, 142, 63, 0) 71%);
+  --glow-blue: rgb(96 140 255 / 0.32);
+  --glow-teal: rgb(45 212 191 / 0.28);
+  --glow-cyan: rgb(125 211 252 / 0.3);
+  --glow-green: rgb(110 231 183 / 0.25);
+  --scroll-thumb: rgb(27 42 74 / 0.18);
+  --grid-bg: rgb(255 255 255 / 0.9);
+  --tooltip-bg: rgb(27 42 74);
+}
+
+html, body, #root { height: 100%; }
+body {
+  @apply text-slate-800 antialiased;
+  font-size: 14px;
+  font-feature-settings: 'cv11', 'ss01';
+  background: var(--app-base);
+}
+:root[data-theme="light"] body { background: linear-gradient(135deg, #e7ebf3 0%, #f3f0ec 55%, #eaf1f3 100%); }
+::selection { background: rgb(var(--c-teal-500) / 0.35); }
+
+/* the glow behind the glass (fixed, never scrolls) */
+.app-glow { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.app-glow i { position: absolute; border-radius: 9999px; filter: blur(70px); }
+.app-glow .g-blue  { left: -160px; top: 18%; width: 520px; height: 640px; background: var(--glow-blue); }
+.app-glow .g-teal  { right: -140px; bottom: -160px; width: 560px; height: 520px; background: var(--glow-teal); }
+.app-glow .g-cyan  { right: 22%; bottom: -220px; width: 420px; height: 360px; background: var(--glow-cyan); }
+.app-glow .g-green { left: 38%; bottom: -200px; width: 380px; height: 320px; background: var(--glow-green); }
+.app-glow .orb {
+  position: absolute; right: 7%; top: -175px; width: 300px; height: 300px; border-radius: 9999px;
+  background: var(--orb-amber); filter: blur(1px); opacity: .95;
+}
+:root[data-theme="light"] .app-glow .orb { opacity: .75; }
+@media (max-width: 900px) { .app-glow .orb { right: -120px; } }
+
+/* glass: every panel that used to be white */
+.bg-surface { -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%); backdrop-filter: blur(var(--glass-blur)) saturate(150%); }
+
+/* thin scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 9999px; border: 3px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+select option, select optgroup { background: rgb(var(--c-surface2)); color: rgb(var(--c-slate-900)); }
+:root:not([data-theme="light"]) select option { background: #161a23; }
+input[type="checkbox"], input[type="radio"] { accent-color: rgb(var(--c-teal-500)); }
+
+@layer components {
+  .glass { @apply bg-surface shadow-glass; border: 1px solid var(--glass-border); }
+  .btn { @apply inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium transition duration-150 disabled:cursor-not-allowed disabled:opacity-45; }
+  .btn-primary { @apply btn bg-teal text-white shadow-glow hover:bg-teal-600 active:translate-y-px; }
+  .btn-teal { @apply btn-primary; }
+  .btn-ghost { @apply btn text-slate-700 hover:bg-slate-100 hover:text-slate-900; }
+  .btn-outline { @apply btn border border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-slate-100; }
+  .btn-danger { @apply btn border border-red-200 bg-red-50 text-red-700 hover:bg-red-100; }
+  .card { @apply glass rounded-2xl; }
+  .card-solid { @apply rounded-2xl bg-surface2 shadow-glass; border: 1px solid var(--glass-border); }
+  .card-h { @apply flex items-center justify-between border-b border-slate-100 px-5 py-3.5 font-semibold text-navy; }
+  .input { @apply w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition focus:border-teal-400 focus:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-teal-100; }
+  .label { @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500; }
+  .chip { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium; }
+  .h1 { @apply text-2xl font-semibold tracking-tight text-navy; }
+  .muted { @apply text-slate-500; }
+  .kbd { @apply rounded-md border border-slate-200 bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-500; }
+}
+:root[data-theme="light"] .input { background: rgb(255 255 255 / 0.75); }
+:root[data-theme="light"] .btn-outline { background: rgb(255 255 255 / 0.7); }
+
+/* ------------------------------------------------------------------ AG Grid (Job board) ---
+   Opaque enough that pinned columns never show the scrolled content underneath. */
+.ag-theme-quartz {
+  --ag-font-family: 'Inter Variable', Inter, 'Segoe UI', system-ui, sans-serif; --ag-font-size: 13px;
+  --ag-background-color: var(--grid-bg);
+  --ag-foreground-color: rgb(var(--c-slate-800));
+  --ag-data-color: rgb(var(--c-slate-800));
+  --ag-secondary-foreground-color: rgb(var(--c-slate-500));
+  --ag-header-foreground-color: rgb(var(--c-slate-500));
+  --ag-header-background-color: transparent;
+  --ag-border-color: rgb(var(--c-slate-200) / var(--a-slate-200));
+  --ag-row-border-color: rgb(var(--c-slate-100) / var(--a-slate-100));
+  --ag-row-hover-color: rgb(var(--c-slate-50) / var(--a-slate-50));
+  --ag-selected-row-background-color: rgb(var(--c-teal-50) / var(--a-teal-50));
+  --ag-active-color: rgb(var(--c-teal-500));
+  --ag-checkbox-checked-color: rgb(var(--c-teal-500));
+  --ag-checkbox-unchecked-color: rgb(var(--c-slate-400));
+  --ag-checkbox-background-color: transparent;
+  --ag-input-border-color: rgb(var(--c-slate-300) / var(--a-slate-300));
+  --ag-modal-overlay-background-color: transparent;
+  --ag-odd-row-background-color: transparent;
+  --ag-control-panel-background-color: rgb(var(--c-surface2) / var(--a-surface2));
+  --ag-menu-background-color: rgb(var(--c-surface2) / var(--a-surface2));
+  --ag-tooltip-background-color: var(--tooltip-bg);
+}
+.jb.ag-theme-quartz {
+  --ag-borders: none; --ag-wrapper-border-radius: 0; --ag-cell-horizontal-padding: 14px;
+  --ag-header-column-resize-handle-color: rgb(var(--c-slate-200) / var(--a-slate-200));
+}
+.jb .ag-root-wrapper { border: 0; background: transparent; }
+.jb .ag-header { border-bottom: 1px solid rgb(var(--c-slate-200) / var(--a-slate-200)); }
+.jb .ag-header-cell-text { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.jb .ag-row { cursor: pointer; }
+.jb .ag-row.jb-open { background-color: rgb(var(--c-teal-50) / var(--a-teal-50)); }
+.jb .ag-pinned-left-cols-container .ag-row.jb-open .ag-cell:first-child { box-shadow: inset 3px 0 0 rgb(var(--c-teal-500)); }
+.jb .ag-pinned-right-header, .jb .ag-pinned-right-cols-container { border-left: 0 !important; }
+.jb .ag-pinned-left-header, .jb .ag-pinned-left-cols-container { border-right: 0 !important; }
+
+/* active segment in a pill switch */
+.seg-on { background: rgb(255 255 255 / 0.13); box-shadow: 0 1px 0 rgb(255 255 255 / 0.08) inset, 0 4px 14px -6px rgb(0 0 0 / .6); }
+:root[data-theme="light"] .seg-on { background: #fff; box-shadow: 0 1px 2px rgb(15 23 42 / .08), 0 4px 12px -6px rgb(15 23 42 / .18); }
