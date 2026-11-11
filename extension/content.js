@@ -1,13 +1,40 @@
 // Job Hunt Agent – Apply helper (runs on the page you are looking at, only when you ask or follow a job).
 // Reads the form, asks the app on your PC what to fill, fills it, colours it. You press Submit.
 (() => {
-  if (window.__jhaLoaded) return
-  window.__jhaLoaded = true
+  // Already running on this page? Only if that copy still talks to the extension. After the extension is
+  // reloaded or updated, the old copy is cut off ("context invalidated"): then this fresh copy takes over.
+  if (window.__jhaAlive && window.__jhaAlive()) return
+  document.getElementById('jha-panel')?.remove()
+  window.__jhaAlive = () => { try { return !!chrome.runtime?.id } catch (e) { return false } }
 
-  const send = (msg) => new Promise((res) => {
-    try { chrome.runtime.sendMessage(msg, (r) => res(r || { ok: false, error: 'no answer' })) } catch (e) { res({ ok: false, error: String(e) }) }
+  const once = (msg) => new Promise((res) => {
+    try {
+      chrome.runtime.sendMessage(msg, (r) => {
+        const err = chrome.runtime.lastError
+        res(r || { ok: false, error: err ? err.message : 'no answer', retry: true })
+      })
+    } catch (e) { res({ ok: false, error: String(e.message || e), dead: true }) }
   })
+  // the extension's background wakes up on the first message: try again a few times before giving up
+  const send = async (msg) => {
+    let r
+    for (let i = 0; i < 4; i++) {
+      r = await once(msg)
+      if (r.ok || r.dead || !r.retry) return r
+      await new Promise((ok) => setTimeout(ok, 250 * (i + 1)))
+    }
+    return r
+  }
   const api = async (method, path, body) => { const r = await send({ type: 'api', method, path, body }); if (!r.ok) throw new Error(r.error); return r.data }
+  // what to tell you when the app can't be reached, by the real reason
+  const whyNot = (e) => {
+    const m = String((e && e.message) || e || '')
+    if (/context invalidated|Extension context|dead/i.test(m) || !window.__jhaAlive())
+      return '⚠ The helper was updated. Reload this page (F5), then press Fill this page.'
+    if (/Failed to fetch|NetworkError|ERR_CONNECTION|Load failed/i.test(m))
+      return '⚠ The Job Hunt Agent app is not running on this PC (start scripts\\start.bat).'
+    return `⚠ The app answered with an error: ${m.slice(0, 160)}`
+  }
 
   const DONE = /thank(s| you) for (your )?(application|applying|bewerbung)|application (has been |was )?(received|submitted|sent)|we('ve| have) received your application|successfully (submitted|applied)|vielen dank für (ihre|deine) bewerbung|danke für (ihre|deine) bewerbung|bewerbung (ist |wurde )?(erfolgreich )?(eingegangen|versendet|übermittelt|abgeschickt)|ihre bewerbung (ist|wurde) bei uns eingegangen|you have successfully applied|bewerbung erfolgreich/i
   const APPLY = /^\s*(apply( now| for this job| for this position)?|jetzt bewerben|bewerben|zur bewerbung|online bewerben|apply on (the )?company('s)? (website|site)|auf (der )?unternehmenswebsite bewerben|bewerbung starten|i'm interested|easy apply)\s*$/i
@@ -304,7 +331,7 @@
   // which job is this page? 1) the one picked in the app, 2) the company in the address/title, 3) you pick it here
   async function ensureJob() {
     if (job) return true
-    try { job = (await api('GET', '/api/ext/active')).job } catch (e) { status('⚠ The Job Hunt Agent app is not running on this PC (start scripts\\start.bat).'); return false }
+    try { job = (await api('GET', '/api/ext/active')).job } catch (e) { status(whyNot(e)); return false }
     if (job) return true
     let cands = [], queue = []
     try { cands = (await api('GET', `/api/ext/match?url=${encodeURIComponent(location.href)}&title=${encodeURIComponent(document.title)}`)).candidates } catch (e) {}
