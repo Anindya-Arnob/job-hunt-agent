@@ -29,6 +29,20 @@ def running(kind: Optional[str] = None) -> list[int]:
         return [r.id for r in s.exec(q).all()]
 
 
+def close_stale_runs() -> int:
+    """At start no run can still be going: one left on 'running' was cut off when the app closed.
+    Without this the Build queue showed it as running forever and kept the Build button disabled."""
+    n = 0
+    with db.session_scope() as s:
+        for r in s.exec(select(m.Run).where(m.Run.status == "running")).all():
+            r.status = "failed"
+            r.finished_at = r.finished_at or datetime.now().astimezone()
+            r.errors = list(r.errors or []) + ["Stopped: the app was closed while this was running. Start it again."]
+            s.add(r)
+            n += 1
+    return n
+
+
 def _track(run_id: int, coro) -> None:
     t = asyncio.get_running_loop().create_task(coro)
     _tasks[run_id] = t

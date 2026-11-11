@@ -84,6 +84,33 @@ def target_paths(job: m.Job) -> tuple[Path, str, str]:
     return folder, f"{owner}_CV_{comp}_{role}", f"{owner}_Cover_Letter_{comp}_{role}"
 
 
+def _own_docs(job_id: int) -> list[m.Document]:
+    with db.session_scope() as s:
+        return list(s.exec(select(m.Document).where(m.Document.job_id == job_id)).all())
+
+
+def free_paths(job: m.Job) -> tuple[Path, str, str]:
+    """target_paths, but never on top of another job's files (two jobs with the same title and company,
+    or with no company at all, used to share one file name and the second one was never built)."""
+    folder, cv_name, letter_name = target_paths(job)
+    mine = {p for d in _own_docs(job.id) for p in (d.docx_path, d.pdf_path) if p}
+
+    def taken(*stems: str) -> bool:
+        return any((folder / f"{st}{e}").exists() and str(folder / f"{st}{e}") not in mine
+                   for st in stems for e in (".docx", ".pdf"))
+    if taken(cv_name, letter_name):
+        city = safe_filename_part((job.location or "").split(",")[0], 20)
+        for tag in ([city] if city else []) + [f"job{job.id}"]:
+            if not taken(f"{cv_name}_{tag}", f"{letter_name}_{tag}"):
+                return folder, f"{cv_name}_{tag}", f"{letter_name}_{tag}"
+    return folder, cv_name, letter_name
+
+
+def built_files(job_id: int) -> list[str]:
+    """This job's own CV files that still exist on disk."""
+    return [p for d in _own_docs(job_id) if d.kind == "cv" for p in (d.docx_path, d.pdf_path) if p and Path(p).exists()]
+
+
 def clean_title(title: str) -> str:
     """'Werkstudent Data (m/w/d) - Berlin' -> 'Werkstudent Data - Berlin' (no gender tags in letters)."""
     t = re.sub(r"\(\s*(m|w|d|f|x|div|all genders?|alle geschlechter|gn\*?)(\s*[/|,]\s*(m|w|d|f|x|div|i))*\s*\)", "", title or "", flags=re.I)
@@ -184,14 +211,15 @@ def next_job(state: BuildState) -> dict:
         job, sc = _load(jid)
         if not job:
             continue
-        folder, cv_name, _ = target_paths(job)
         if sc and sc.total < settings.build_min_score and not state.get("rebuild"):
             results.append({"job_id": jid, "status": "skipped", "reason": f"Score {sc.total} below {settings.build_min_score}"})
             continue
-        exists = (folder / f"{cv_name}.docx").exists() or (folder / f"{cv_name}.pdf").exists()
-        if exists and not state.get("rebuild"):
-            results.append({"job_id": jid, "status": "already built", "folder": str(folder),
-                            "cv_file": f"{cv_name}.docx"})
+        have = built_files(jid)
+        if have and not state.get("rebuild"):
+            results.append({"job_id": jid, "status": "already built", "folder": str(Path(have[0]).parent),
+                            "cv_file": Path(have[0]).name})
+            events.emit({"type": "build", "message": f"{job.company or 'This job'} – {job.title}: already built "
+                         f"({Path(have[0]).name}). Use Rebuild to make a new version.", "job_id": jid}, run_id=state["run_id"])
             continue
         events.emit({"type": "build", "message": f"Building CV for {job.company} – {job.title}", "job_id": jid},
                     run_id=state["run_id"])
@@ -292,7 +320,7 @@ def save(state: BuildState) -> dict:
     jid = state["current"]
     job, sc = _load(jid)
     _, vid = _profile(state)
-    folder, cv_name, letter_name = target_paths(job)
+    folder, cv_name, letter_name = free_paths(job)
     folder.mkdir(parents=True, exist_ok=True)
     tmp = Path(state["tmp_dir"]) / f"job{jid}"
     files = {}

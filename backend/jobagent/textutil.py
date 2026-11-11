@@ -77,3 +77,40 @@ def safe_folder_name(s: str, max_len: int = 80) -> str:
     s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", s or "")
     s = re.sub(r"\s+", " ", s).strip().rstrip(".")
     return s[:max_len].rstrip(". ") or "Unknown"
+
+
+# ------------------------------------------------------------------ company from the job page ---
+_ABOUT_CO = re.compile(r"(?:About the company|Über das Unternehmen)\s*\n+\s*([^\n]{2,80}?)\s*\n", re.I)
+_NOT_A_COMPANY = re.compile(
+    r"^(xing|linkedin|stepstone|indeed|wellfound|show more|mehr anzeigen|similar jobs|ähnliche jobs|all job offers|"
+    r"alle stellenangebote|easy apply|save job|log ?in|anmelden|find jobs|jobs finden|search|suche|\d+)$", re.I)
+
+
+def _company_ok(name: str, title: str) -> bool:
+    n = name.strip()
+    return (2 <= len(n) <= 80 and not _NOT_A_COMPANY.match(n) and n.lower() != (title or "").strip().lower()
+            and not re.search(r"(\+ \d+ (more|weitere)|posted|veröffentlicht|employees|mitarbeitende|€)", n, re.I))
+
+
+def guess_company(title: str, description: str) -> str:
+    """Company name from a stored job page when the search result had none.
+    XING pages read '<title>\\n<title>\\n\\n<company>\\n<industry>' and later 'About the company\\n\\n<company>'."""
+    text = description or ""
+    m = _ABOUT_CO.search(text)
+    if m and _company_ok(m.group(1), title):
+        return m.group(1).strip()
+    t = (title or "").strip().lower()
+    if not t:
+        return ""
+    lines = [ln.strip() for ln in text.split("\n")]
+    for i, ln in enumerate(lines):
+        if ln.lower() != t:
+            continue
+        j = i + 1
+        while j < len(lines) and not lines[j]:
+            j += 1
+        if j >= len(lines) or j == i + 1 or lines[j].lower() == t:
+            continue                    # needs a blank line after the title block
+        if _company_ok(lines[j], title) and j + 1 < len(lines) and lines[j + 1]:
+            return lines[j]
+    return ""

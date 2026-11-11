@@ -40,6 +40,19 @@ from contextlib import asynccontextmanager
 async def lifespan(_app):
     db.init_db()
     try:
+        n = runs.close_stale_runs()
+        if n:
+            log.info("closed %d run(s) left over from the last session", n)
+    except Exception as e:
+        log.warning("stale runs: %s", e)
+    try:
+        from ..steps.clean import fill_missing_companies
+        n = fill_missing_companies()
+        if n:
+            log.info("filled in the company for %d job(s)", n)
+    except Exception as e:
+        log.warning("company backfill: %s", e)
+    try:
         from ..steps.clean import hide_junk_jobs
         hide_junk_jobs()
     except Exception as e:  # never block the start

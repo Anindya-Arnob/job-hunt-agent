@@ -14,7 +14,7 @@ from sqlmodel import or_, select
 
 from .. import db, models as m
 from ..schemas import RawJob
-from ..textutil import SENIOR_TITLE, STUDENT_TITLE, dedupe_key, normalize_url, strip_accents
+from ..textutil import SENIOR_TITLE, STUDENT_TITLE, dedupe_key, guess_company, normalize_url, strip_accents
 
 # ----------------------------------------------------------------- regions ---
 GERMAN_CITIES = (
@@ -178,6 +178,8 @@ def ingest(raw_jobs: list[RawJob], run_id: Optional[int], fp: m.FilterProfile) -
         dead_urls, dead_keys = _tombstones(s)
         for rj in raw_jobs:
             url_key = normalize_url(rj.url)
+            if not (rj.company or "").strip():
+                rj.company = guess_company(rj.title, rj.description)   # XING results often have no company
             dkey = dedupe_key(rj.company, rj.title, rj.location)
             if (url_key and url_key in dead_urls) or dkey in dead_keys:
                 counts["previously_deleted"] += 1
@@ -191,6 +193,8 @@ def ingest(raw_jobs: list[RawJob], run_id: Optional[int], fp: m.FilterProfile) -
                     existing.links = existing.links + [rj.url]
                 if rj.description and len(rj.description) > len(existing.full_description or ""):
                     existing.full_description = rj.description
+                if not existing.company and rj.company:
+                    existing.company = rj.company.strip()
                 existing.last_seen_run = run_id
                 s.add(existing)
                 continue
@@ -277,6 +281,19 @@ def hide_junk_jobs() -> int:
                                                              m.JobStatus.NEEDS_REVIEW]))).all():
             if not_a_job(j.title, j.link):
                 j.status, j.exclude_reason = m.JobStatus.EXCLUDED, "Not a job (a link from a search page)"
+                s.add(j)
+                n += 1
+    return n
+
+
+def fill_missing_companies() -> int:
+    """Jobs saved without a company: read it from the stored job page (runs at every start)."""
+    n = 0
+    with db.session_scope() as s:
+        for j in s.exec(select(m.Job).where(m.Job.company == "")).all():
+            name = guess_company(j.title, j.full_description)
+            if name:
+                j.company = name
                 s.add(j)
                 n += 1
     return n
