@@ -86,7 +86,11 @@ def test_collect_in_your_own_chrome_with_a_human_check(app_server, profile, fake
             # Indeed shows its "verify you are human" page: the helper waits for you
             await tab.wait_for_selector("#jhc-panel", timeout=20000)
             await tab.wait_for_function("() => /verify you are human/i.test(document.querySelector('#jhc-status')?.textContent || '')", timeout=20000)
-            waiting = httpx.get("http://127.0.0.1:8780/api/collect/status").json()
+            for _ in range(40):                       # the helper tells the app a moment after it shows the message
+                waiting = httpx.get("http://127.0.0.1:8780/api/collect/status").json()
+                if waiting.get("waiting"):
+                    break
+                await asyncio.sleep(0.5)
             # you pass the check: the site sets its cookie and reloads
             await ctx.add_cookies([{"name": "human", "value": "ok", "domain": "de.indeed.test", "path": "/"}])
             await tab.reload()
