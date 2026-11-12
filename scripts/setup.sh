@@ -130,12 +130,14 @@ if [ "$OS" = "Darwin" ]; then
   LAUNCH="$HOME/Desktop/Job Hunt Agent.command"
   printf '#!/bin/bash\n# Starts Job Hunt Agent. Close this window to stop it.\nexec "%s/scripts/start.sh"\n' "$DEST" > "$LAUNCH"
   chmod +x "$LAUNCH"
+  # give it the app's picture instead of the plain script icon (best effort)
+  osascript -l JavaScript -e "ObjC.import('AppKit'); \$.NSWorkspace.sharedWorkspace.setIconForFileOptions(\$.NSImage.alloc.initWithContentsOfFile('$DEST/scripts/job-hunt-agent.png'), '$LAUNCH', 0)" >/dev/null 2>&1 || true
   note "Double-click 'Job Hunt Agent' on your Desktop to start it."
   note "A Terminal window shows it is running: close that window to stop the app."
 else
   LAUNCH="$DEST/scripts/start.sh"
   mkdir -p "$HOME/.local/share/applications"
-  printf '[Desktop Entry]\nType=Application\nName=Job Hunt Agent\nExec=%s/scripts/start.sh\nTerminal=true\n' "$DEST" \
+  printf '[Desktop Entry]\nType=Application\nName=Job Hunt Agent\nExec=%s/scripts/start.sh\nIcon=%s/scripts/job-hunt-agent.png\nTerminal=true\n' "$DEST" "$DEST" \
     > "$HOME/.local/share/applications/job-hunt-agent.desktop"
   note "Start it from your app menu ('Job Hunt Agent') or with $DEST/scripts/start.sh"
 fi

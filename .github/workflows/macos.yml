@@ -40,6 +40,7 @@ jobs:
           ls -d ~/Applications/LibreOffice.app /Applications/LibreOffice.app 2>/dev/null || true
           ~/.local/bin/claude --version
           test -x "$HOME/Desktop/Job Hunt Agent.command"
+          xattr -l "$HOME/Desktop/Job Hunt Agent.command" | grep -q FinderInfo && echo "custom icon set" || echo "no custom icon"
           cat "$HOME/Desktop/Job Hunt Agent.command"
 
       - name: Start the app the way the Desktop icon does, check it answers
