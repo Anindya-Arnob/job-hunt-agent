@@ -268,6 +268,8 @@ def skip() -> dict:
 def finish(status: str = "done") -> dict:
     if not SESSION:
         return {"active": False, "next": None}
+    if SESSION["status"] != "running":            # already finished (Stop pressed twice, a late page)
+        return {**public(), "next": None}
     if SESSION["pending"]:
         SESSION["idx"] = min(SESSION["idx"], len(SESSION["queue"]))
     SESSION["status"] = status

@@ -53,7 +53,11 @@ def test_plan_and_pages_without_a_browser(profile, fake_hosts):
         assert len(jobs) == 2 and any("Python and SQL" in (j.full_description or "") for j in jobs)
         assert all("indeed" in j.sources for j in jobs)
     collect.stop()
+    collect.stop()                                       # Stop pressed again: recorded once
     assert not collect.public()["active"]
+    with db.session_scope() as s:
+        run = s.get(m.Run, st["run_id"])
+        assert len(run.errors) <= 1                     # never one line per press
 
 
 def test_collect_in_your_own_chrome_with_a_human_check(app_server, profile, fake_hosts, tmp_path):  # noqa: F811
