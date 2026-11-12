@@ -18,8 +18,9 @@ note() { printf '    %s\n' "$*"; }
 warn() { printf '    \033[33m%s\033[0m\n' "$*"; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export PATH="$HOME/.local/bin:$PATH"
-# Prompts must read the keyboard even when this script arrives through `curl | bash`
-TTY=/dev/tty; [ -r /dev/tty ] || TTY=/dev/null
+# Prompts must read the keyboard even when this script arrives through `curl | bash`; with no keyboard at all
+# (an assistant or a test running it) nothing waits for one
+TTY=""; if ( exec </dev/tty ) 2>/dev/null; then TTY=/dev/tty; fi
 
 # ---------------------------------------------------------------- the app's files ---
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
@@ -109,8 +110,12 @@ fi
 if [ -x "$CLAUDE" ]; then
   note "Claude Code $("$CLAUDE" --version 2>/dev/null | head -1) ready."
   if ! "$CLAUDE" auth status 2>/dev/null | grep -q '"loggedIn": *true'; then
-    note "Log in with your Claude Pro / Max account: your browser opens now."
-    "$CLAUDE" auth login <"$TTY" || warn "Not logged in yet: the app shows a 'Log in again' button."
+    if [ -n "$TTY" ]; then
+      note "Log in with your Claude Pro / Max account: your browser opens now."
+      "$CLAUDE" auth login <"$TTY" || warn "Not logged in yet: the app shows a 'Log in again' button."
+    else
+      warn "Not logged in to Claude yet: run 'claude auth login' in Terminal, or press 'Log in again' in the app."
+    fi
   else
     note "Already logged in."
   fi
@@ -121,6 +126,7 @@ fi
 # ---------------------------------------------------------------- the icon ---
 say "A 'Job Hunt Agent' icon to start the app"
 if [ "$OS" = "Darwin" ]; then
+  mkdir -p "$HOME/Desktop"
   LAUNCH="$HOME/Desktop/Job Hunt Agent.command"
   printf '#!/bin/bash\n# Starts Job Hunt Agent. Close this window to stop it.\nexec "%s/scripts/start.sh"\n' "$DEST" > "$LAUNCH"
   chmod +x "$LAUNCH"

@@ -1,0 +1,94 @@
+# Installs and tests Job Hunt Agent on a real Mac, exactly as a new user would:
+# the one-line install, the Desktop icon, starting the app, a CV turned into a PDF, every screen, the Chrome helper.
+name: macOS install test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  mac:
+    name: Fresh install on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]          # Apple Silicon
+    env:
+      JHA_NO_START: "1"             # the test starts the app itself, without a Terminal window
+      JHA_BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: This Mac
+        run: |
+          sw_vers; uname -m
+          echo "python3: $(python3 --version 2>&1)"
+          ls /Applications | grep -iE "libreoffice|word" || echo "no LibreOffice / Word preinstalled"
+
+      - name: One-line install (what a new user pastes into Terminal)
+        run: curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/setup.sh" | bash
+
+      - name: What got installed
+        run: |
+          set -x
+          ls ~/JobHuntAgent
+          ~/JobHuntAgent/.venv/bin/python --version
+          ls -d ~/Applications/LibreOffice.app /Applications/LibreOffice.app 2>/dev/null || (echo "LibreOffice missing" && exit 1)
+          ~/.local/bin/claude --version
+          test -x "$HOME/Desktop/Job Hunt Agent.command"
+          cat "$HOME/Desktop/Job Hunt Agent.command"
+
+      - name: Start the app the way the Desktop icon does, check it answers
+        run: |
+          cd ~/JobHuntAgent
+          ./scripts/start.sh --no-browser > ~/app.log 2>&1 &
+          for i in $(seq 1 90); do curl -sf http://127.0.0.1:8780/api/status >/dev/null && break; sleep 1; done
+          curl -sf -o /dev/null http://127.0.0.1:8780/ && echo "web page OK"
+          curl -s http://127.0.0.1:8780/api/status | ./.venv/bin/python -c "import json,sys; d=json.load(sys.stdin); print('pdf_available', d['pdf_available']); assert d['pdf_available']"
+          echo "Claude login: $(curl -s http://127.0.0.1:8780/api/claude/login)"
+
+      - name: Upload a CV and turn a tailored CV into a PDF (LibreOffice on the Mac)
+        run: |
+          cd ~/JobHuntAgent/backend
+          ../.venv/bin/python - <<'EOF'
+          from pathlib import Path
+          from jobagent.cv.parser import parse_docx
+          from jobagent.cv.service import DEFAULT_STYLE
+          from jobagent.docs.render import render_cv
+          from jobagent.docs.pdf import to_pdf, find_soffice
+          from jobagent.api.main import profile_to_content
+          import tempfile
+          print("soffice:", find_soffice())
+          prof = parse_docx(Path("tests/fixtures/master_cv.docx"))
+          out = Path(tempfile.mkdtemp()) / "cv.docx"
+          render_cv(profile_to_content(prof), prof, DEFAULT_STYLE, out)
+          pdf = to_pdf(out)
+          print("PDF:", pdf, pdf.stat().st_size, "bytes")
+          assert pdf.stat().st_size > 10000
+          EOF
+
+      - name: Stop the app
+        if: always()
+        run: pkill -f "jobagent" || true
+
+      - name: Full test suite on the Mac
+        run: cd ~/JobHuntAgent/backend && ../.venv/bin/python -m pytest -q -p no:cacheprovider
+
+      - name: Every screen in a browser
+        run: |
+          cd ~/JobHuntAgent/backend
+          ../.venv/bin/python tests/ui_server.py 8790 > ~/ui_server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8790/api/status >/dev/null && break; sleep 1; done
+          ../.venv/bin/python tests/ui_e2e.py http://127.0.0.1:8790 ~/ui-screens
+
+      - name: Logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.os }}
+          path: |
+            ~/app.log
+            ~/ui_server.log
+            ~/ui-screens
+          if-no-files-found: ignore
