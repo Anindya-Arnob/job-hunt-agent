@@ -9,16 +9,18 @@ on:
 
 jobs:
   mac:
-    name: Fresh install on ${{ matrix.os }}
+    name: Fresh install on ${{ matrix.os }} (${{ matrix.libreoffice }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest]          # Apple Silicon
+        libreoffice: [download, homebrew]   # most Macs have no Homebrew: test the official download too
     env:
       JHA_NO_START: "1"             # the test starts the app itself, without a Terminal window
       JHA_BRANCH: ${{ github.ref_name }}
+      JHA_NO_BREW: ${{ matrix.libreoffice == 'download' && '1' || '' }}
     steps:
       - name: This Mac
         run: |
@@ -34,7 +36,8 @@ jobs:
           set -x
           ls ~/JobHuntAgent
           ~/JobHuntAgent/.venv/bin/python --version
-          ls -d ~/Applications/LibreOffice.app /Applications/LibreOffice.app 2>/dev/null || (echo "LibreOffice missing" && exit 1)
+          [ -d ~/Applications/LibreOffice.app ] || [ -d /Applications/LibreOffice.app ] || (echo "LibreOffice missing" && exit 1)
+          ls -d ~/Applications/LibreOffice.app /Applications/LibreOffice.app 2>/dev/null || true
           ~/.local/bin/claude --version
           test -x "$HOME/Desktop/Job Hunt Agent.command"
           cat "$HOME/Desktop/Job Hunt Agent.command"
@@ -86,7 +89,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mac-${{ matrix.os }}
+          name: mac-${{ matrix.os }}-${{ matrix.libreoffice }}
           path: |
             ~/app.log
             ~/ui_server.log

@@ -79,7 +79,7 @@ if command -v soffice >/dev/null 2>&1 || lo_app; then
 elif [ "$OS" = "Darwin" ] && [ -d "/Applications/Microsoft Word.app" ]; then
   note "Microsoft Word found. The first PDF asks once to let Terminal control Word: click OK."
 elif [ "$OS" = "Darwin" ]; then
-  if command -v brew >/dev/null 2>&1 && brew install --cask libreoffice >/dev/null 2>&1; then
+  if [ -z "${JHA_NO_BREW:-}" ] && command -v brew >/dev/null 2>&1 && brew install --cask libreoffice >/dev/null 2>&1; then
     note "LibreOffice installed (Homebrew)."
   else
     note "Downloading LibreOffice (free, about 300 MB) ..."
