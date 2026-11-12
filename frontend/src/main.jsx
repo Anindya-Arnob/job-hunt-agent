@@ -8,6 +8,7 @@ import './index.css'
 import { EventsProvider, useEvents, useOnEvent } from './events'
 import { api } from './api'
 import { ToastProvider } from './ui'
+import { ClaudeLoginBanner, ClaudeLoginProvider, ClaudeLoginStatus } from './components/ClaudeLogin'
 import Dashboard from './pages/Dashboard'
 import SearchPage from './pages/Search'
 import JobBoard from './pages/JobBoard'
@@ -109,6 +110,7 @@ function Sidebar() {
             </NavLink>))}
       </nav>
       <div className="space-y-2 border-t border-slate-100 p-3">
+        <ClaudeLoginStatus compact />
         <div className="flex items-center gap-2.5 rounded-xl px-3 py-1.5 text-[13px] text-slate-600">
           {theme === 'dark' ? <Moon size={15} className="text-slate-500" /> : <Sun size={15} className="text-amber-500" />}
           <span className="flex-1">Dark mode</span>
@@ -142,6 +144,7 @@ function App() {
       <Sidebar />
       <main id="main-scroll" className="relative z-10 min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1720px] px-6 pb-10 pt-5">
+          <ClaudeLoginBanner />
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/search" element={<SearchPage />} />
@@ -169,7 +172,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <ToastProvider>
         <EventsProvider>
-          <App />
+          <ClaudeLoginProvider>
+            <App />
+          </ClaudeLoginProvider>
         </EventsProvider>
       </ToastProvider>
     </BrowserRouter>

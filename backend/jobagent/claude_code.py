@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -176,8 +177,129 @@ LOGIN_GONE = re.compile(r"oauth access token has expired|re-?authenticate|not lo
 
 
 def friendly(why: str) -> str:
-    """Claude Code's own error, said plainly when it is the login."""
+    """Claude Code's own error, said plainly when it is the login (and the app's login status turns red)."""
     if LOGIN_GONE.search(why or ""):
-        return ("Claude Code's login on this PC has expired. Open a terminal (PowerShell), type claude and press "
-                "Enter, and log in again if it asks (or type /login). Then run this again.")
+        note_auth_error(why)
+        return ("Claude Code's login on this PC has expired. Press 'Log in again' at the top of the app "
+                "(or type claude in PowerShell and log in). Then run this again.")
     return why
+
+
+# ------------------------------------------------------------------ login status ---
+# Every Claude Code call tells the app whether the login worked; `claude auth status` is read every 30 minutes.
+# The screen shows a banner (and a desktop notification) as soon as the login is gone or expired.
+LOGIN: dict = {"state": "unknown", "checked": 0.0, "detail": "", "last_ok": 0.0, "last_error": 0.0, "email": "",
+               "method": "", "expires": None}
+
+
+def _set(state: str, detail: str = "") -> None:
+    import time
+    before = LOGIN["state"]
+    LOGIN.update(state=state, detail=detail, checked=time.time())
+    if state != before:
+        try:
+            from . import events
+            events.emit({"type": "claude_login", "state": state, "message": login_message()})
+        except Exception:
+            pass
+
+
+def note_ok() -> None:
+    import time
+    LOGIN["last_ok"] = time.time()
+    _set("ok")
+
+
+def note_auth_error(why: str = "") -> None:
+    import time
+    LOGIN["last_error"] = time.time()
+    _set("expired", (why or "")[:200])
+
+
+def login_message() -> str:
+    st = LOGIN["state"]
+    return {"ok": "Claude Code is logged in.",
+            "expired": "Claude Code's login on this PC has expired. Log in again to keep searching and writing CVs.",
+            "logged_out": "Claude Code is not logged in on this PC. Log in to search the web and write CVs.",
+            "missing": "Claude Code is not installed on this PC.",
+            "api": "The app uses your Anthropic API key, not a Claude Code login.",
+            "offline": "Offline mode: the app works without Claude."}.get(st, "Login not checked yet.")
+
+
+def check_login(probe: bool = False) -> dict:
+    """`claude auth status` (free). With probe=True also one tiny real call (about 3,000 tokens in lean mode),
+    which is the only sure test: an expired token can still say 'logged in'."""
+    import tempfile
+    import time
+    from .config import settings
+    e = exe()
+    if settings.llm_mode == "fake":
+        _set("offline")                  # offline mode on purpose: no Claude, no banner
+        return login_public()
+    if settings.anthropic_api_key and settings.llm_mode == "api":
+        _set("api")
+        return login_public()
+    if not e:
+        _set("missing")
+        return login_public()
+    if re.search(r"^\s+auth\b", help_text(e), re.M):
+        try:
+            out = subprocess.run(prefix(e) + ["auth", "status", "--json"], capture_output=True, timeout=30)
+            info = json.loads((out.stdout or b"{}").decode("utf-8", "replace") or "{}")
+            LOGIN.update(email=str(info.get("email") or ""), method=str(info.get("authMethod") or ""),
+                         expires=info.get("loginExpiresAt"))
+            if info.get("loggedIn") is False:
+                _set("logged_out")
+                return login_public()
+            if info.get("loggedIn") and not (LOGIN["last_error"] > LOGIN["last_ok"]) and not probe:
+                _set("ok")
+                return login_public()
+        except Exception as ex:          # older Claude Code without `auth status`: fall back to the probe
+            log.info("claude auth status: %s", ex)
+    if probe or LOGIN["state"] == "unknown":
+        with tempfile.TemporaryDirectory() as cwd:
+            extra, used = flags(Path(cwd), system="Reply with the single word OK.", no_tools=True, model="haiku")
+            prompt = "OK?" if used else "Reply with the single word OK."
+            try:
+                out = subprocess.run(prefix(e) + ["-p", "--output-format", "json", "--max-turns", "1"] + extra,
+                                     input=prompt.encode(), capture_output=True, cwd=cwd, timeout=120)
+                env = json.loads((out.stdout or b"{}").decode("utf-8", "replace") or "{}")
+                why = str(env.get("result") or "") + (out.stderr or b"").decode("utf-8", "replace")[-300:]
+                if env.get("is_error") or not env:
+                    if LOGIN_GONE.search(why):
+                        note_auth_error(why)
+                    else:
+                        _set(LOGIN["state"] if LOGIN["state"] != "unknown" else "unknown", why[:200])
+                else:
+                    note_ok()
+            except Exception as ex:
+                _set(LOGIN["state"], str(ex)[:200])
+    LOGIN["checked"] = time.time()
+    return login_public()
+
+
+def login_public() -> dict:
+    return {"state": LOGIN["state"], "message": login_message(), "detail": LOGIN["detail"], "checked": LOGIN["checked"],
+            "last_ok": LOGIN["last_ok"], "email": LOGIN["email"], "method": LOGIN["method"], "expires": LOGIN["expires"],
+            "can_open_login": os.name == "nt" or sys.platform == "darwin"}
+
+
+def open_login() -> dict:
+    """Open Claude Code's own login in a new window (your browser then asks you to confirm)."""
+    e = exe()
+    if not e:
+        raise RuntimeError("Claude Code is not installed on this PC.")
+    has_auth = bool(re.search(r"^\s+auth\b", help_text(e), re.M))
+    args = ["auth", "login"] if has_auth else []
+    if os.name == "nt":
+        title = "Claude Code login - close this window when it says you are logged in"
+        inner = subprocess.list2cmdline(prefix(e)[-1:] + args) if not e.lower().endswith((".cmd", ".bat")) \
+            else subprocess.list2cmdline([e] + args)
+        subprocess.Popen(f'start "{title}" cmd /k {inner}', shell=True)
+    elif sys.platform == "darwin":
+        cmd = " ".join([e] + args).replace('"', '\\"')
+        subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to do script "{cmd}"'])
+    else:
+        return {"opened": False, "how": f"Open a terminal and run: {e} {' '.join(args) or '(then type /login)'}"}
+    return {"opened": True, "how": "A window opened: log in there (your browser asks you to confirm)"
+                                   + ("" if has_auth else ", then type /login") + ". Then press 'Check again'."}

@@ -25,6 +25,19 @@ async def _morning():
             log.warning("morning run skipped: %s", e)
 
 
+LOGIN_JOB = "claude_login_check"
+
+
+async def _login_check():
+    """Every 30 minutes: is Claude Code still logged in? (the free `claude auth status`)"""
+    import asyncio
+    from . import claude_code
+    try:
+        await asyncio.to_thread(claude_code.check_login, False)
+    except Exception as e:
+        log.info("login check: %s", e)
+
+
 def start():
     global _sched
     try:
@@ -34,6 +47,9 @@ def start():
     if _sched is None:
         _sched = AsyncIOScheduler()
         _sched.start()
+        from datetime import datetime, timedelta
+        _sched.add_job(_login_check, "interval", minutes=30, id=LOGIN_JOB, replace_existing=True,
+                       next_run_time=datetime.now() + timedelta(seconds=15))
     reschedule()
 
 

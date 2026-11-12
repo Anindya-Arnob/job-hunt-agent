@@ -1589,6 +1589,24 @@ def get_settings():
     return settings.public_dict()
 
 
+@app.get("/api/claude/login")
+async def claude_login_status(check: bool = False, probe: bool = False):
+    """Is Claude Code logged in on this PC? (the banner at the top of the app)"""
+    from .. import claude_code
+    if check or probe or claude_code.LOGIN["state"] == "unknown":
+        return await asyncio.to_thread(claude_code.check_login, probe)
+    return claude_code.login_public()
+
+
+@app.post("/api/claude/login/open")
+def claude_login_open():
+    from .. import claude_code
+    try:
+        return claude_code.open_login()
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/claude/extras")
 def claude_extras():
     """Lean mode, your installed Claude Code plugins and skills, and the tokens of the last calls."""

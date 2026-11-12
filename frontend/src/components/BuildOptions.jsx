@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Cpu, FolderGit2, Github, Loader2, Puzzle, RefreshCw, Save, ShieldCheck, Sparkles } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../ui'
+import { ClaudeLoginStatus } from './ClaudeLogin'
 
 // Keys this card owns (the Settings form leaves them alone)
 export const BUILD_KEYS = ['cv_model', 'letter_model', 'cv_effort', 'cv_projects', 'github_projects', 'github_user', 'github_token',
@@ -151,6 +152,7 @@ export function ClaudeExtras() {
         <button className="btn-teal" disabled={!dirty} onClick={doSave}><Save size={14} />Save</button></div>
       <div className="space-y-3 p-5">
         {!x.claude_code && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Claude Code was not found on this computer.</div>}
+        <ClaudeLoginStatus />
         <Toggle on={lean} onChange={(v) => set('claude_lean', v)} title="Lean mode (saves the most tokens)"
           help="Each call sends only the app's own instructions: no Claude Code system prompt, tools, skills, plugins or MCP servers. About 3,000 instead of about 36,000 input tokens per call." />
         <div className={lean ? 'pointer-events-none opacity-50' : ''}>

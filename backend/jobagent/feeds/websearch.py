@@ -271,6 +271,9 @@ async def _call_cli(prompt: str, q: WebQuery) -> tuple[str, set[str], int, float
                 raise RuntimeError(why)                        # e.g. error_max_turns: only this search failed
     if not text:                                               # ran out of steps: use its last written answer
         text = last_text
+    if text or searches:
+        from ..claude_code import note_ok
+        note_ok()
     return text, links, searches, cost
 
 

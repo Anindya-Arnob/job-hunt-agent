@@ -176,7 +176,7 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
         try:
             env = json.loads(out.stdout.decode("utf-8", "replace"))
         except ValueError:
-            raise LLMUnavailable((out.stderr or b"").decode("utf-8", "replace")[-300:] or "Claude Code gave no answer")
+            raise LLMUnavailable(cc.friendly((out.stderr or b"").decode("utf-8", "replace")[-300:] or "Claude Code gave no answer"))
         if env.get("is_error"):
             raise LLMUnavailable(cc.friendly(str(env.get("result") or env.get("subtype"))[:300]))
         _note_usage(node, env)
@@ -195,6 +195,8 @@ usage_log: list[dict] = []          # the last Claude Code calls: node, input/ou
 
 
 def _note_usage(node: str, env: dict) -> None:
+    from .claude_code import note_ok
+    note_ok()                                  # the login works
     u = env.get("usage") or {}
     inp = (u.get("input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0)
     usage_log.append({"node": node, "input_tokens": inp, "output_tokens": u.get("output_tokens") or 0,
