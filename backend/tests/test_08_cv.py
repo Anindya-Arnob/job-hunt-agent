@@ -100,10 +100,14 @@ def test_template_style(master_cv_path):
 
 def test_pdf_upload_falls_back_to_text_parser(tmp_path, master_cv_path):
     import subprocess
+    from jobagent.docs.pdf import find_soffice
     out = tmp_path / "pdf"
     out.mkdir()
-    r = subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(out), str(master_cv_path)],
-                       capture_output=True, timeout=180)
+    soffice = find_soffice()                      # on a Mac it is inside LibreOffice.app, not on the PATH
+    if not soffice:
+        pytest.skip("LibreOffice not available")
+    r = subprocess.run([soffice, f"-env:UserInstallation={(tmp_path / 'lo').as_uri()}", "--headless", "--convert-to", "pdf",
+                        "--outdir", str(out), str(master_cv_path)], capture_output=True, timeout=180)
     pdf = out / (master_cv_path.stem + ".pdf")
     if not pdf.exists():
         pytest.skip("LibreOffice not available")

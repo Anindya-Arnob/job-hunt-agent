@@ -94,6 +94,8 @@ def test_apply_in_your_own_browser_with_the_extension(app_server, master_cv_path
             await page.wait_for_url("**/ats/acme/apply", timeout=15000)
             # the form gets filled automatically
             await page.wait_for_function("() => document.querySelector('#fn') && document.querySelector('#fn').value === 'Alex'", timeout=30000)
+            # the helper fills one field after the other (no jumping around): wait for the last of these
+            await page.wait_for_function("() => document.querySelector('#sal').value !== '' && document.querySelector('#start').value !== ''", timeout=30000)
             vals = {k: await page.input_value(f"#{k}") for k in ("fn", "ln", "em", "start", "sal")}
             files = await page.eval_on_selector("#cv", "e => e.files.length ? e.files[0].name : ''")
             letter_name = await page.eval_on_selector("#cl", "e => e.files.length ? e.files[0].name : ''")
@@ -104,7 +106,7 @@ def test_apply_in_your_own_browser_with_the_extension(app_server, master_cv_path
             panel = await page.inner_text("#jha-panel")
             # you: change Claude's answer, then press "Fill this page" again - your text must stay
             await page.click("#team")
-            await page.keyboard.press("Control+A")
+            await page.keyboard.press("ControlOrMeta+A")                  # Ctrl+A, Cmd+A on a Mac
             await page.keyboard.type("The analytics platform team.")
             await page.fill("#ph", "")                                  # you cleared the phone on purpose...
             await page.click("#ph")
