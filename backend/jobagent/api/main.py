@@ -119,8 +119,7 @@ def status():
     main = cvs.get_main()
     return {"settings": settings.public_dict(), "has_main_cv": bool(main),
             "running": runs.running(), "today": date.today().isoformat(),
-            "pdf_available": __import__("jobagent.docs.pdf", fromlist=["find_soffice"]).find_soffice() is not None
-            or __import__("sys").platform == "win32"}
+            "pdf_available": __import__("jobagent.docs.pdf", fromlist=["pdf_available"]).pdf_available()}
 
 
 GOOD = ("Apply", "Apply after CV tailoring")
@@ -1170,7 +1169,7 @@ def pdf_page_image(path: str, page: int = 0, scale: float = 1.6):
 
 @app.post("/api/files/open-folder")
 def open_folder(body: dict):
-    """Open a folder in Windows Explorer (local app only)."""
+    """Open a folder in Explorer / Finder (local app only)."""
     import os
     import sys
     p = _safe_path(body.get("path", ""))
@@ -1178,7 +1177,12 @@ def open_folder(body: dict):
     if sys.platform == "win32":
         os.startfile(str(target))  # type: ignore[attr-defined]
         return {"ok": True}
-    return {"ok": False, "path": str(target)}
+    import subprocess
+    try:
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(target)])   # Finder / file manager
+        return {"ok": True}
+    except OSError:
+        return {"ok": False, "path": str(target)}
 
 
 # ------------------------------------------------------------------ tracker ---

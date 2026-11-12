@@ -31,8 +31,10 @@ _load_dotenv(PROJECT_ROOT / ".env")
 
 
 def _default_job_dir() -> str:
-    if sys.platform == "win32":
-        return str(Path.home() / "Documents" / "JobHunt")
+    """Where CVs, letters and the job list go: Documents/JobHunt (Windows and macOS), else in the project."""
+    docs = Path.home() / "Documents"
+    if sys.platform in ("win32", "darwin") or docs.is_dir():
+        return str(docs / "JobHunt")
     return str(PROJECT_ROOT / "sample_job_dir")
 
 

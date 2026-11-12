@@ -35,6 +35,11 @@ def exe() -> str:
         for p in (os.path.expandvars(r"%APPDATA%\npm\claude.cmd"), os.path.expanduser(r"~\.local\bin\claude.exe")):
             if os.path.exists(p):
                 return p
+    if not e:                     # macOS / Linux: the installer's place, also when the app was not started from a shell
+        for p in (os.path.expanduser("~/.local/bin/claude"), os.path.expanduser("~/.claude/local/claude"),
+                  "/opt/homebrew/bin/claude", "/usr/local/bin/claude"):
+            if os.path.exists(p):
+                return p
     return e
 
 

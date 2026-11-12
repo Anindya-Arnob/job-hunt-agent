@@ -168,7 +168,7 @@ Everything runs **locally** in one Python process: FastAPI serves the React app 
 |---|---|
 | **Python 3.11+** | [python.org/downloads](https://www.python.org/downloads/) (Windows: tick *Add python.exe to PATH*) |
 | **A Claude subscription** | Claude **Pro or Max** (used through Claude Code). An API key works too; see below |
-| **Word → PDF** | Microsoft Word (Windows, used automatically) **or** [LibreOffice](https://www.libreoffice.org/) |
+| **Word → PDF** | Microsoft Word (Windows or Mac) **or** [LibreOffice](https://www.libreoffice.org/) (free; Mac: `brew install --cask libreoffice`) |
 | **Chrome or Edge** | for the apply helper extension |
 
 No Node.js needed: the built web app is included in `frontend/dist`.
@@ -180,11 +180,29 @@ git clone https://github.com/Anindya-Arnob/job-hunt-agent.git
 cd job-hunt-agent
 ```
 
-| Windows | macOS / Linux |
-|---|---|
-| Double-click **`scripts\install.bat`** | `./scripts/install.sh` |
+| Windows | macOS | Linux |
+|---|---|---|
+| Double-click **`scripts\install.bat`** | Double-click **`scripts/install.command`** (or `./scripts/install.sh` in Terminal) | `./scripts/install.sh` |
 
 The installer creates a Python environment in `.venv`, installs the packages and the Chromium browser for the site agents, copies `.env.example` to `.env`, and checks for Claude Code.
+
+<details>
+<summary><b>On a Mac</b>: step by step</summary>
+
+1. Open **Terminal** (Spotlight → "Terminal").
+2. Python: macOS's own `python3` is too old. Install a new one: `brew install python@3.12` ([Homebrew](https://brew.sh)), or the installer from [python.org](https://www.python.org/downloads/macos/).
+3. Word → PDF: `brew install --cask libreoffice` (or install Microsoft Word; the first PDF then asks once to let Terminal control Word: click **OK**).
+4. Get the app and install it:
+   ```bash
+   git clone https://github.com/Anindya-Arnob/job-hunt-agent.git
+   cd job-hunt-agent
+   ./scripts/install.sh
+   ```
+   (`git` missing? macOS offers to install the developer tools: click **Install**, then run the line again.)
+5. Claude Code: `curl -fsSL https://claude.ai/install.sh | bash`, open a **new** Terminal window, run `claude` and log in.
+6. Start: `./scripts/start.sh`, or double-click `scripts/start.command` in Finder. The app opens in your browser; your CVs go to **Documents/JobHunt**.
+7. The browser helper: Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → the `extension` folder.
+</details>
 
 ### 3. Connect your Claude subscription (Claude Code)
 
@@ -200,9 +218,9 @@ Then open a new terminal, run **`claude`**, and log in with your Claude Pro or M
 
 ### 4. Start it
 
-| Windows | macOS / Linux |
-|---|---|
-| Double-click **`scripts\start.bat`** | `./scripts/start.sh` |
+| Windows | macOS | Linux |
+|---|---|---|
+| Double-click **`scripts\start.bat`** | Double-click **`scripts/start.command`** (or `./scripts/start.sh`) | `./scripts/start.sh` |
 
 The app opens at **http://127.0.0.1:8780**. Close the window (or press Ctrl+C) to stop it.
 

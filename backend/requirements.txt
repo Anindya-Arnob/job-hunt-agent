@@ -23,6 +23,6 @@ pypdfium2==5.13.0
 pdfplumber==0.11.10
 pillow==12.3.0
 pytest==9.1.1
-# Word -> PDF on Windows when LibreOffice is not installed (uses Microsoft Word)
-docx2pdf==0.1.8; sys_platform == "win32"
+# Word -> PDF on Windows / macOS when LibreOffice is not installed (uses Microsoft Word)
+docx2pdf==0.1.8; sys_platform == "win32" or sys_platform == "darwin"
 pywin32>=311; sys_platform == "win32"
