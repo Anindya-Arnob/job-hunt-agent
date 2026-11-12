@@ -40,6 +40,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (msg.type === 'unfollow') { const f = await getFollow(); delete f[msg.tabId || sender.tab.id]; await setFollow(f); return reply({ ok: true }) }
       if (msg.type === 'follow-info') { const f = await getFollow(); return reply({ ok: true, data: f[sender.tab.id] || null }) }
       if (msg.type === 'fill-tab') { await inject(msg.tabId, true, true); return reply({ ok: true }) }
+      if (msg.type === 'collect-next') {      // collecting: move this tab to the next search after a short pause
+        const t = sender.tab.id
+        setTimeout(() => chrome.tabs.update(t, { url: msg.url }).catch(() => {}), Math.max(500, msg.pause || 3000))
+        return reply({ ok: true })
+      }
       if (msg.type === 'pending') {           // you pressed Submit: the next page may be the confirmation
         const f = await getFollow(); const t = sender.tab.id; f[t] = { ...(f[t] || {}), pendingDone: msg.jobId, pendingAt: Date.now(), jobId: msg.jobId }
         await setFollow(f); return reply({ ok: true })
@@ -50,12 +55,20 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   return true
 })
 
-// A job link opened from the app's Apply page -> follow that tab.
+async function injectCollect(tabId) {
+  try { await chrome.scripting.executeScript({ target: { tabId }, files: ['collect.js'] }) } catch (e) { /* not a web page */ }
+}
+
+// A tab opened from the app: from the Search screen -> collect jobs there; from the Apply page -> follow the job.
 chrome.tabs.onCreated.addListener(async (tab) => {
   if (!tab.openerTabId) return
   try {
     const opener = await chrome.tabs.get(tab.openerTabId)
     if (!(opener.url || '').startsWith(APP)) return
+    if ((opener.url || '').startsWith(APP + '/search')) {
+      const c = await api('GET', '/api/collect/status')
+      if (c.active) { const f = await getFollow(); f[tab.id] = { collect: c.id }; await setFollow(f); return }
+    }
     const a = await api('GET', '/api/ext/active')
     if (a.job) { const f = await getFollow(); f[tab.id] = { jobId: a.job.id }; await setFollow(f) }
   } catch (e) { /* app not running */ }
@@ -65,6 +78,17 @@ chrome.tabs.onCreated.addListener(async (tab) => {
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
   if (info.status !== 'complete' || !tab.url || tab.url.startsWith(APP) || tab.url.startsWith('chrome')) return
   const f = await getFollow()
+  if (!f[tabId] && tab.openerTabId && /(^|\.)(indeed|glassdoor)\./.test(new URL(tab.url).host)) {
+    // the app opened this tab first and started collecting a moment later
+    try {
+      const opener = await chrome.tabs.get(tab.openerTabId)
+      if ((opener.url || '').startsWith(APP + '/search')) {
+        const c = await api('GET', '/api/collect/status')
+        if (c.active) { f[tabId] = { collect: c.id }; await setFollow(f) }
+      }
+    } catch (e) { /* app not running or opener closed */ }
+  }
+  if (f[tabId] && f[tabId].collect) return injectCollect(tabId)
   if (f[tabId]) await inject(tabId, true)
 })
 chrome.tabs.onRemoved.addListener(async (tabId) => { const f = await getFollow(); delete f[tabId]; await setFollow(f) })

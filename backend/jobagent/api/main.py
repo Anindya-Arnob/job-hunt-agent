@@ -680,6 +680,72 @@ def ext_active():
     return bridge.active()
 
 
+# ------------------------------------------------- collect in your Chrome (Glassdoor, Indeed) ---
+class CollectIn(BaseModel):
+    sites: list[str] = ["glassdoor", "indeed"]
+    filter_profile_id: Optional[int] = None
+
+
+class CollectPage(BaseModel):
+    url: str
+    html: str = ""
+    waiting: str = ""
+
+
+@app.post("/api/collect/start")
+def collect_start(body: CollectIn):
+    from .. import collect
+    try:
+        return collect.start(body.sites, body.filter_profile_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/collect/status")
+def collect_status():
+    from .. import collect
+    return collect.public()
+
+
+@app.post("/api/collect/stop")
+def collect_stop():
+    from .. import collect
+    return collect.stop()
+
+
+@app.post("/api/collect/skip")
+def collect_skip():
+    from .. import collect
+    return collect.skip()
+
+
+@app.post("/api/ext/collect/heartbeat")
+def ext_collect_heartbeat(body: CollectPage):
+    from .. import collect
+    return collect.heartbeat(body.waiting)
+
+
+@app.post("/api/ext/collect/page")
+async def ext_collect_page(body: CollectPage):
+    from .. import collect
+    try:
+        return await asyncio.to_thread(collect.page, body.url, body.html)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/ext/collect/detail")
+async def ext_collect_detail(body: CollectPage):
+    from .. import collect
+    return await asyncio.to_thread(collect.detail, body.url, body.html)
+
+
+@app.post("/api/ext/collect/done")
+async def ext_collect_done():
+    from .. import collect
+    return await asyncio.to_thread(collect.page_done)
+
+
 @app.get("/api/ext/match")
 def ext_match(url: str = "", title: str = ""):
     from ..apply import bridge

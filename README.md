@@ -50,6 +50,8 @@ Every job is classified (internship / working student / part-time / full-time) a
 ### 📝 Writes tailored documents
 For the jobs you tick, it writes a **one-page CV** and a **cover letter** in your own Word layout. It picks the projects closest to the job from your CV **and your GitHub**, shows the **ATS score before and after**, and runs a recruiter-style review. A checker and automatic QA reject anything not backed by your CV or your own READMEs. You choose the model (Haiku, Sonnet, Opus, Fable) and how many projects.
 
+Glassdoor and Indeed refuse automated browsers, so the extension collects them **in a tab of your own Chrome**: you do the "verify you are human" check or log in once, and it goes through the searches by itself.
+
 </td>
 </tr>
 <tr>

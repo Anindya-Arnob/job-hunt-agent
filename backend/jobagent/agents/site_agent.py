@@ -33,8 +33,8 @@ from .sites import SITES, SiteSpec
 
 log = logging.getLogger(__name__)
 
-MANUAL_NOTE = ("{site} blocks automated browsers - not searched automatically. "
-               "Open its searches in your own browser from the Search screen.")
+MANUAL_NOTE = ("{site} blocks automated browsers - not searched by the app's browser. "
+               "It is collected in a tab of your own Chrome instead (Search screen, under Sources).")
 AUTO_CHECK_SECONDS = 20          # how long an automatic check may take before you are asked
 BLOCK_BACKOFF = [45, 120]        # seconds to wait after a refused page before trying it again
 SITE_MIN_DELAY = {"indeed": 8.0, "glassdoor": 6.0, "linkedin": 4.0}   # seconds between two searches

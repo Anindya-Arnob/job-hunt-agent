@@ -55,7 +55,7 @@ export default function Runs() {
                 {detail.searches.some((x) => x.status === 'manual') && (
                   <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <span>🛡️</span><div><b>{[...new Set(detail.searches.filter((x) => x.status === 'manual').map((x) => SOURCE_LABEL[x.site] || x.site))].join(', ')}</b> blocks automated browsers – it refused the app even after the “verify you are human” check was passed.
-                      The app no longer searches it by itself, so it stops slowing down your runs. On the <b>Search</b> screen (under Sources) you find the same searches as links to open in your own browser, and a button to try the automatic search again.</div></div>)}
+                      The app no longer searches it by itself, so it stops slowing down your runs. Instead, when you press Run on the <b>Search</b> screen, it opens a tab in your own Chrome: do the check or log in there once, and the extension collects the jobs by itself (or press <b>Collect now</b> under Sources).</div></div>)}
                 {!detail.searches.some((x) => x.status === 'manual') && detail.coverage.some((c) => c.human_check) && (
                   <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <span>🛡️</span><div><b>{detail.coverage.filter((c) => c.human_check).map((c) => SOURCE_LABEL[c.site] || c.site).join(', ')}</b> showed a “verify you are human” check.

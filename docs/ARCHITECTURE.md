@@ -106,6 +106,20 @@ flowchart LR
     clean_dedupe --> classify --> score --> export --> END
 ```
 
+
+### Glassdoor and Indeed: collected in your own Chrome
+
+Both sites refuse automated browsers, even after a human check, so a site that keeps refusing is switched to `manual` and the app's site agent skips it. Instead `collect.py` and the extension's `collect.js` collect it in a normal tab of your Chrome:
+
+1. On **Run** (or **Collect now**) the Search screen opens a tab and `POST /api/collect/start` makes the list of searches: the same queries the planner builds, spread round-robin over roles and locations, at most 20 search pages per site.
+2. The background script follows that tab (it was opened by the app's Search screen) and injects `collect.js` on every page load.
+3. `collect.js` waits until the job list shows. Meanwhile it tells you to do the "verify you are human" check or to log in, and reports `waiting` to the app, which shows it on the Search screen.
+4. It sends the page HTML to `/api/ext/collect/page`. The app reads the cards with the same parser as its own searches (`indeed_parse`, `gd_parse`), applies the quick pre-filter, and returns the job pages it wants: new jobs only, at most 30 per search page.
+5. `collect.js` fetches those pages in the same tab with your session (1 to 3 seconds apart) and posts them to `/api/ext/collect/detail`, which keeps the description (`main_text` with the site's selectors; check or login pages are skipped).
+6. `/api/ext/collect/done` stores the jobs through `ingest` (duplicates, filters, deleted jobs), sorts and scores the new ones in the background, and returns the next search; the tab moves there after 3 to 7 seconds.
+
+The collection is a `collect` run in Runs & coverage. Skip and Stop are on the page and on the Search screen. Nothing is clicked or submitted on the sites.
+
 ### 3.1 `plan_queries`: the query planner (`steps/planner.py`)
 
 A **filter profile** (roles, must/must-not keywords, job types, locations, posted-within days, sources, accepted German level) is turned into many small, site-specific searches. Each site gets its own vocabulary (e.g. *Werkstudent*, *Praktikum*, *Working Student*, *Internship*), locations are split (Berlin, Germany, Remote, ...), and sites that support boolean search (`OR_SITES`) get combined `OR` queries. If a query hits a site's result cap, `split_query` splits it by role terms and the graph re-plans it (up to `MAX_SPLIT_ROUNDS = 3`), so nothing is missed because of pagination limits.
