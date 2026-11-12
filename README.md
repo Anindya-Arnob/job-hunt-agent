@@ -186,23 +186,15 @@ cd job-hunt-agent
 
 The installer creates a Python environment in `.venv`, installs the packages and the Chromium browser for the site agents, copies `.env.example` to `.env`, and checks for Claude Code.
 
-<details>
-<summary><b>On a Mac</b>: step by step</summary>
+### 🍎 On a Mac: one line, nothing else to install
 
-1. Open **Terminal** (Spotlight → "Terminal").
-2. Python: macOS's own `python3` is too old. Install a new one: `brew install python@3.12` ([Homebrew](https://brew.sh)), or the installer from [python.org](https://www.python.org/downloads/macos/).
-3. Word → PDF: `brew install --cask libreoffice` (or install Microsoft Word; the first PDF then asks once to let Terminal control Word: click **OK**).
-4. Get the app and install it:
-   ```bash
-   git clone https://github.com/Anindya-Arnob/job-hunt-agent.git
-   cd job-hunt-agent
-   ./scripts/install.sh
-   ```
-   (`git` missing? macOS offers to install the developer tools: click **Install**, then run the line again.)
-5. Claude Code: `curl -fsSL https://claude.ai/install.sh | bash`, open a **new** Terminal window, run `claude` and log in.
-6. Start: `./scripts/start.sh`, or double-click `scripts/start.command` in Finder. The app opens in your browser; your CVs go to **Documents/JobHunt**.
-7. The browser helper: Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → the `extension` folder.
-</details>
+Open **Terminal** (Spotlight → "Terminal"), paste this line and press Enter:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Anindya-Arnob/job-hunt-agent/main/scripts/setup.sh | bash
+```
+
+It installs everything by itself, without admin rights: Python (just for this app), the packages, the browser for the site agents, LibreOffice for PDFs (skipped if you have it or Microsoft Word), and Claude Code. Your browser opens once to log in to your Claude account. Then the app starts, and a **Job Hunt Agent** icon on your Desktop starts it from then on (close its Terminal window to stop it). Run the same line again to update; your CV, jobs and documents stay. The app lives in `~/JobHuntAgent`, your CVs go to `Documents/JobHunt`.
 
 ### 3. Connect your Claude subscription (Claude Code)
 
