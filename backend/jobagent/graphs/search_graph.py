@@ -17,7 +17,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 from sqlmodel import select
 
-from .. import db, events, llm, models as m
+from .. import db, events, llm, models as m, progress
 from ..agents.site_agent import SiteAgent
 from ..agents.sites import SITES
 from ..browser import connections
@@ -92,6 +92,12 @@ def plan_queries(state: SearchState) -> dict:
             sq[site] = [q.model_dump() for q in qs]
     fq = planner.plan_feed_queries(fp.roles, fp.job_types, fp.locations) if "arbeitsagentur" in fp.sources else []
     total = sum(len(v) for v in sq.values()) + len(fq)
+    srcs = {site: len(qs) for site, qs in sq.items() if qs}
+    if FEED_SOURCES & set(fp.sources or []):
+        srcs["feeds"] = 0
+    if settings.websearch_enabled and (set(W.WEB_SITES) & set(fp.sources or []) or settings.websearch_other_sites):
+        srcs["websearch"] = 0
+    progress.start(state["run_id"], srcs, no_pages=("feeds", "websearch"))
     _emit(state, f"Planned {total} searches across {len(sq) + (1 if fq else 0)} sources", stage="plan")
     return {"site_queries": sq, "feed_queries": fq}
 
@@ -124,8 +130,11 @@ async def web_search(payload: dict) -> dict:
         say(msg, level="warn")
         outcomes.append({"site": "websearch", "query": "(setup)", "location": "", "mode": "web", "status": "failed",
                          "reported": None, "collected": 0, "pages": 0, "error": msg})
+        progress.source(run_id, "websearch", done=True, jobs=0)
         events.emit({"type": "site_done", "site": "websearch", "jobs": 0, "message": "Web search: not set up"}, run_id=run_id)
         return {"raw_jobs": [], "outcomes": outcomes, "errors": [msg]}
+    n_done = [0]
+    progress.source(run_id, "websearch", phase="searching", searched=0, searches=len(queries), reads_pages=False)
     say(f"{len(queries)} web searches planned ({'Claude Code' if eng == 'cli' else 'Anthropic API' if eng == 'api' else eng})")
 
     def done(r: "W.WebResult"):
@@ -137,6 +146,8 @@ async def web_search(payload: dict) -> dict:
                          "error": r.error or (f"{r.dropped} unverified result(s) dropped" if r.dropped else "") or r.note})
         why = r.error or (r.note if not r.jobs else "")
         say(f"{q.label}: {len(r.jobs)} jobs" + (f" - {why}" if why else ""), level="warn" if r.error else None)
+        n_done[0] += 1
+        progress.source(run_id, "websearch", searched=n_done[0])
 
     try:
         results = await W.run_all(queries, caller=WEB_CALLER, on_done=done)
@@ -150,6 +161,7 @@ async def web_search(payload: dict) -> dict:
         say(f"web search stopped: {e}", level="warn")
     except llm.BudgetExceeded as e:
         errors.append(f"web search: {e}")
+    progress.source(run_id, "websearch", done=True, jobs=len(jobs))
     events.emit({"type": "site_done", "site": "websearch", "jobs": len(jobs),
                  "message": f"Web search: {len(jobs)} jobs"}, run_id=run_id)
     return {"raw_jobs": [j.model_dump(mode="json") for j in jobs], "outcomes": outcomes, "errors": errors}
@@ -188,10 +200,19 @@ async def site_agent(payload: dict) -> dict:
                     run_id=run_id)
         return await events.wait_for(f"captcha:{run_id}:{site_name}", timeout=300)
 
+    base = {"searched": 0, "new": 0, "last_new": 0}       # earlier rounds (narrower searches add a round)
+
+    def on_progress(**kw):
+        if "searched" in kw:
+            base["last_new"] = kw.get("new_seen", 0)
+            kw.update(searched=base["searched"] + kw["searched"], searches=base["searched"] + kw["searches"],
+                      new_seen=base["new"] + base["last_new"])
+        progress.source(run_id, site, **kw)
+
     agent = SiteAgent(site, connection_status=status, known_url_keys=known_url_keys(),
                       emit=lambda e: events.emit(e, run_id=run_id), on_captcha=on_captcha,
                       prefilter=lambda j: prefilter_reason(j, fp), reader_factory=READER_FACTORY,
-                      start_mode=_get_start_mode(site))
+                      start_mode=_get_start_mode(site), on_progress=on_progress)
     queries = [Query(**q) for q in payload["queries"]]
     jobs: list[RawJob] = []
     outcomes: list[dict] = []
@@ -201,6 +222,9 @@ async def site_agent(payload: dict) -> dict:
             if not queries:
                 break
             res = await agent.run(queries)
+            base["searched"] += len(queries)
+            base["new"] += base["last_new"]
+            base["last_new"] = 0
             jobs += res.jobs
             if agent.refuses_automation:
                 _set_start_mode(site, "manual")      # blocks automated browsers: stop trying, show links instead
@@ -233,6 +257,7 @@ async def site_agent(payload: dict) -> dict:
         errors.append(f"{site}: {e}")
         outcomes.append({"site": site, "query": "(agent)", "location": "", "mode": "guest", "status": "failed",
                          "reported": None, "collected": 0, "pages": 0, "error": str(e)[:300]})
+    progress.source(run_id, site, done=True, jobs=len(jobs))
     events.emit({"type": "site_done", "site": site, "jobs": len(jobs),
                  "message": f"{SITES[site].label}: {len(jobs)} jobs"}, run_id=run_id)
     return {"raw_jobs": [j.model_dump(mode="json") for j in jobs], "outcomes": outcomes, "errors": errors}
@@ -245,9 +270,17 @@ async def feeds(payload: dict) -> dict:
     jobs: list[RawJob] = []
     outcomes, errors = [], []
 
+    with db.session_scope() as s:
+        n_ats = len([c for c in s.exec(select(m.TargetCompany).where(m.TargetCompany.active == True)).all()  # noqa: E712
+                     if c.ats in F.ATS]) if "ats_feeds" in sources else 0
+    planned = n_ats + (len(payload.get("feed_queries", [])) if "arbeitsagentur" in sources else 0) \
+        + len({"arbeitnow", "remoteok"} & sources)
+    progress.source(run_id, "feeds", phase="searching", searched=0, searches=planned, reads_pages=False)
+
     def rec(src, query, n, status="ok", reported=None, err=""):
         outcomes.append({"site": src, "query": query, "location": "", "mode": "feed", "status": status,
                          "reported": reported, "collected": n, "pages": 1, "error": err[:300]})
+        progress.source(run_id, "feeds", searched=len(outcomes))
 
     async with F._client(transport=FEED_TRANSPORT) as client:
         if "ats_feeds" in sources:
@@ -287,6 +320,7 @@ async def feeds(payload: dict) -> dict:
                     rec(src, "latest", len(got))
                 except Exception as e:
                     rec(src, "latest", 0, "failed", err=str(e))
+    progress.source(run_id, "feeds", done=True, jobs=len(jobs))
     events.emit({"type": "site_done", "site": "feeds", "jobs": len(jobs),
                  "message": f"Job feeds: {len(jobs)} jobs"}, run_id=run_id)
     return {"raw_jobs": [j.model_dump(mode="json") for j in jobs], "outcomes": outcomes, "errors": errors}
@@ -295,6 +329,7 @@ async def feeds(payload: dict) -> dict:
 def clean_dedupe(state: SearchState) -> dict:
     fp = _fp(state["filter_profile_id"])
     raws = [RawJob.model_validate(r) for r in state.get("raw_jobs", [])]
+    progress.post(state["run_id"], "storing", 0, len(raws))
     counts = ingest(raws, state["run_id"], fp)
     new_ids = counts.pop("new_ids")
     with db.session_scope() as s:
@@ -303,6 +338,18 @@ def clean_dedupe(state: SearchState) -> dict:
     _emit(state, f"{counts['found']} found, {counts['new']} new, {counts['duplicates']} duplicates, "
                  f"{counts['excluded']} excluded", stage="clean")
     return {"counts": counts, "new_ids": new_ids}
+
+
+def _ticker(run_id: int, stage: str, total: int):
+    """Counts finished jobs for the progress bar (called from the worker threads)."""
+    import threading
+    lock, n = threading.Lock(), [0]
+
+    def tick():
+        with lock:
+            n[0] += 1
+            progress.post(run_id, stage, n[0], total)
+    return tick
 
 
 def _parallel(fn, items):
@@ -315,7 +362,16 @@ def classify(state: SearchState) -> dict:
     run_id = state["run_id"]
     ids = state.get("new_ids", [])
 
+    progress.post(run_id, "sorting", 0, len(ids))
+    tick = _ticker(run_id, "sorting", len(ids))
+
     def one(jid):
+        try:
+            return _classify_one(jid)
+        finally:
+            tick()
+
+    def _classify_one(jid):
         llm.set_current_run(run_id)
         with db.session_scope() as s:
             job = s.get(m.Job, jid)
@@ -361,7 +417,16 @@ def score(state: SearchState) -> dict:
         ids = [j.id for j in s.exec(select(m.Job).where(m.Job.first_seen_run == run_id,
                                                          m.Job.status.in_([m.JobStatus.NEW, m.JobStatus.NEEDS_REVIEW]))).all()]
 
+    progress.post(run_id, "scoring", 0, len(ids))
+    tick = _ticker(run_id, "scoring", len(ids))
+
     def one(jid):
+        try:
+            return _score_one(jid)
+        finally:
+            tick()
+
+    def _score_one(jid):
         llm.set_current_run(run_id)
         with db.session_scope() as s:
             job = s.get(m.Job, jid)
@@ -399,6 +464,7 @@ def export(state: SearchState) -> dict:
     cost = llm.cost_tracker.run_cost.get(run_id, 0.0)
     _update_run(run_id, counts=counts, errors=state.get("errors", []), status="done",
                 finished_at=datetime.now().astimezone(), cost_usd=round(cost, 4))
+    progress.finish(run_id, "done")
     _emit(state, f"Done. Saved {path.name}", stage="done", file=str(path))
     events.emit({"type": "run_done", "kind": "search", "message": "Search finished"}, run_id=run_id)
     return {"export_path": str(path), "counts": counts}
@@ -449,7 +515,11 @@ async def run_search(filter_profile_id: int, run_id: Optional[int] = None, resum
             final = await graph.ainvoke(inp, thread)
         final["run_id"] = run_id
         return final
+    except asyncio.CancelledError:
+        progress.finish(run_id, "cancelled")
+        raise
     except Exception as e:
+        progress.finish(run_id, "failed")
         log.exception("search run failed")
         _update_run(run_id, status="failed", finished_at=datetime.now().astimezone(), errors=[str(e)[:500]])
         events.emit({"type": "run_failed", "kind": "search", "message": f"Search failed: {e}"}, run_id=run_id)

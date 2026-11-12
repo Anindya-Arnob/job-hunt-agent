@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlmodel import func, or_, select
 
-from .. import db, events, llm, models as m
+from .. import db, events, llm, models as m, progress
 from ..browser import connections
 from ..config import PROJECT_ROOT, settings
 from ..cv import service as cvs
@@ -368,7 +368,24 @@ async def resume_run(run_id: int):
 
 @app.post("/api/runs/{run_id}/cancel")
 async def cancel_run(run_id: int):
-    return {"ok": await runs.cancel(run_id)}
+    ok = await runs.cancel(run_id)
+    progress.finish(run_id, "cancelled")
+    return {"ok": ok}
+
+
+@app.get("/api/runs/{run_id}/progress")
+def run_progress(run_id: int):
+    """The progress bar: how far each source is, and about how long the run still takes."""
+    snap = progress.snapshot(run_id)
+    if snap:
+        return snap
+    with db.session_scope() as s:
+        r = s.get(m.Run, run_id)
+        if not r:
+            _err("Run not found", 404)
+        # a run from before the app (re)started: no live figures, only whether it finished
+        return {"run_id": run_id, "stage": r.status, "eta_seconds": None, "finishes_at": None, "sources": [],
+                "fraction": 1.0 if r.status != "running" else 0.0, "elapsed_seconds": None, "post": None}
 
 
 class CaptchaIn(BaseModel):

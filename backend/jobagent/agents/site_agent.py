@@ -74,17 +74,22 @@ class SiteResult:
 
 
 class SiteAgent:
+    on_progress = staticmethod(lambda **kw: None)     # progress bar: searched / pages read (set per run)
+
     def __init__(self, site: str, *, connection_status: str = "not_connected",
                  known_url_keys: Optional[set] = None, emit: Optional[Emit] = None,
                  on_captcha: Optional[CaptchaHandler] = None,
                  prefilter: Optional[Callable[[RawJob], Optional[str]]] = None,
                  reader_factory: Callable[[str, str], PageReader] = None,
-                 max_pages: Optional[int] = None, start_mode: str = "guest"):
+                 max_pages: Optional[int] = None, start_mode: str = "guest",
+                 on_progress: Optional[Callable[..., None]] = None):
         self.spec: SiteSpec = SITES[site]
         self.site = site
         self.can_login = self.spec.supports_login and connection_status == "connected"
         self.known = known_url_keys or set()
         self.emit = emit or (lambda e: None)
+        if on_progress:
+            self.on_progress = on_progress
         self.on_captcha = on_captcha
         self.prefilter = prefilter or (lambda j: None)
         self.reader_factory = reader_factory or (lambda s, mode: PageReader(
@@ -346,6 +351,7 @@ class SiteAgent:
             todo = todo[:cap]
         t0, done, backoffs = time.monotonic(), 0, 0
         i = 0
+        self.on_progress(phase="reading", pages_done=0, pages_total=len(todo))
         while i < len(todo):
             j = todo[i]
             mode = j.mode if j.mode in ("guest", "login", "window") else "guest"
@@ -384,6 +390,7 @@ class SiteAgent:
                             setattr(j, k, v)
             done += 1
             i += 1
+            self.on_progress(phase="reading", pages_done=i, pages_total=len(todo))
             if done % 25 == 0 and i < len(todo):
                 per = (time.monotonic() - t0) / done
                 mins = round(per * (len(todo) - i) / 60)
@@ -395,6 +402,8 @@ class SiteAgent:
     async def run(self, queries: list[Query]) -> SiteResult:
         res = SiteResult(site=self.site)
         all_jobs: dict[str, RawJob] = {}
+        fresh = 0                                   # new jobs that pass the quick pre-filter (their pages get read)
+        self.on_progress(phase="searching", searched=0, searches=len(queries), new_seen=0)
         try:
             for i, q in enumerate(queries):
                 if i and not (self.human_check_given_up or self.blocked_given_up or self.start_mode == "manual"):
@@ -408,6 +417,9 @@ class SiteAgent:
                     k = normalize_url(j.url)
                     if k not in all_jobs:
                         all_jobs[k] = j
+                        if k not in self.known and not j.description and not self.prefilter(j):
+                            fresh += 1
+                self.on_progress(phase="searching", searched=i + 1, searches=len(queries), new_seen=fresh)
             # Only new jobs that survive the quick pre-filter get their description fetched.
             to_fetch = []
             for k, j in all_jobs.items():

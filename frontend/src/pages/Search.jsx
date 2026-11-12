@@ -3,6 +3,7 @@ import { Chrome, ExternalLink, Loader2, Play, Plus, RotateCcw, Save, SkipForward
 import { api, fmtTime, SOURCE_LABEL } from '../api'
 import { ChipSelect, StatusBadge, TagInput, useAsync, useToast } from '../ui'
 import { useEvents } from '../events'
+import RunProgress from '../components/RunProgress'
 
 const BLANK = { name: 'New profile', roles: [], keywords_in: [], keywords_out: [], job_types: ['Internship', 'Working Student', 'Part-time'],
   locations: ['Berlin', 'Remote'], work_modes: ['Remote', 'Hybrid', 'On-site'], days: 5, sources: [], language_max: 'any',
@@ -124,6 +125,7 @@ export default function SearchPage() {
                   <button className="btn-primary" onClick={() => solved(c.site)}>Solved</button>
                 </div>
               ))}
+              <RunProgress runId={runId} finished={done} />
               <div className="space-y-1.5">
                 {Object.entries(siteProgress).map(([site, p]) => (
                   <div key={site} className="flex items-center gap-2 text-sm">
