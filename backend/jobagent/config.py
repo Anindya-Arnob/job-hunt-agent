@@ -74,6 +74,8 @@ class Settings:
     page_delay_seconds: float = field(default_factory=lambda: float(_env("PAGE_DELAY_SECONDS", "3")))
     page_settle_ms: int = field(default_factory=lambda: int(_env("PAGE_SETTLE_MS", "1200")))
     max_pages_per_search: int = field(default_factory=lambda: int(_env("MAX_PAGES_PER_SEARCH", "3")))
+    # job pages read per site and run (about 6 s each); the rest keep the short text from the result list
+    max_details_per_site: int = field(default_factory=lambda: int(_env("MAX_DETAILS_PER_SITE", "300")))
     headless_guest: bool = field(default_factory=lambda: _env("HEADLESS_GUEST", "true").lower() == "true")
     # Web-search agent (finds postings through Claude's web search, like a Claude chat does)
     websearch_enabled: bool = field(default_factory=lambda: _env("WEBSEARCH_ENABLED", "true").lower() == "true")
@@ -150,7 +152,7 @@ class Settings:
     EDITABLE = (
         "llm_mode", "model_fast", "model_smart", "daily_budget_usd", "verdict_skip_below",
         "verdict_apply_from", "build_min_score", "max_build_attempts", "schedule_time",
-        "schedule_enabled", "page_delay_seconds", "max_pages_per_search", "headless_guest",
+        "schedule_enabled", "page_delay_seconds", "max_pages_per_search", "max_details_per_site", "headless_guest",
         "websearch_enabled", "websearch_engine", "websearch_max_calls", "websearch_searches_per_call",
         "websearch_other_sites", "websearch_cli_model", "claude_cli_path", "apply_daily_limit",
         "cv_model", "letter_model", "cv_effort", "cv_projects", "github_projects", "github_user", "github_token",

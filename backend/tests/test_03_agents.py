@@ -296,3 +296,41 @@ def test_indeed_with_your_login_is_used_when_guest_is_blocked(server, monkeypatc
     res = asyncio.run(a.run([q("indeed"), q("indeed", kw="ml")]))
     assert [o.status for o in res.outcomes] == ["ok", "ok"] and {o.mode for o in res.outcomes} == {"login"}
     assert len(res.jobs) == 2 and all("Python" in j.description for j in res.jobs)
+
+
+def test_job_pages_most_relevant_first_with_a_cap_and_progress(monkeypatch):
+    """1,405 job pages took 2 h 20 min in silence: now the best ones first, a cap per run, progress with time left."""
+    import asyncio
+    from jobagent.agents import site_agent as SA
+    from jobagent.config import settings
+    from jobagent.schemas import RawJob
+    monkeypatch.setattr(settings, "max_details_per_site", 30)
+    monkeypatch.setattr(settings, "page_delay_seconds", 0)
+    logs, opened = [], []
+
+    class Snap:
+        status, final_url, title, text, html = 200, "", "", "a job " * 50, "<div class='d'>" + "Python SQL " * 40 + "</div>"
+
+    class Reader:
+        async def goto(self, url):
+            opened.append(url)
+            return Snap()
+
+        async def pause(self):
+            pass
+    agent = SA.SiteAgent.__new__(SA.SiteAgent)
+    agent.site, agent.spec, agent.start_mode, agent.can_login = "linkedin", SA.SITES["linkedin"], "guest", False
+    agent.emit = lambda e: logs.append(e["message"])
+
+    async def reader(mode):
+        return Reader()
+    agent.reader = reader
+    monkeypatch.setattr(SA, "detect_block", lambda snap: None)
+    jobs = [RawJob(source="linkedin", title=f"Sales Manager {i}", company="X", url=f"https://www.linkedin.com/jobs/view/{1000 + i}")
+            for i in range(60)]
+    jobs.insert(40, RawJob(source="linkedin", title="Werkstudent Machine Learning Python", company="Y",
+                           url="https://www.linkedin.com/jobs/view/999"))
+    asyncio.run(agent.fetch_details(jobs))
+    assert len(opened) == 30 and "999" in opened[0]                   # the relevant one first, then the cap
+    assert any("most relevant of 61" in m for m in logs) and any("read 25 of 30 job pages, about" in m for m in logs)
+    assert logs[-1] == "read 30 of 30 job pages"

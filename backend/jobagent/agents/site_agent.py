@@ -19,6 +19,8 @@ collected) so the planner can split searches that hit the site's limit.
 from __future__ import annotations
 
 import asyncio
+import re
+import time
 import logging
 import random
 from dataclasses import dataclass, field
@@ -325,10 +327,27 @@ class SiteAgent:
             j.mode = mode
         return out, list(found.values())
 
+    def detail_order(self, jobs: list[RawJob]) -> list[RawJob]:
+        """The job pages worth reading first: titles that name your roles' skills and a student job type."""
+        from ..vocab import ALL_TERMS, find_terms
+        student = re.compile(r"werkstudent|working student|intern|praktik|thesis|abschlussarbeit|trainee", re.I)
+
+        def rank(j: RawJob) -> float:
+            t = j.title or ""
+            return len(find_terms(t, ALL_TERMS)) + (2 if student.search(t) else 0)
+        return sorted(jobs, key=rank, reverse=True)       # stable: same rank keeps the search order
+
     async def fetch_details(self, jobs: list[RawJob]) -> None:
-        for j in jobs:
-            if j.description:
-                continue
+        todo = [j for j in self.detail_order(jobs) if not j.description]
+        cap = max(0, settings.max_details_per_site)
+        if cap and len(todo) > cap:
+            self._log(f"reading the {cap} most relevant of {len(todo)} job pages this run "
+                      f"(the other {len(todo) - cap} keep their short text; MAX_DETAILS_PER_SITE in Settings)")
+            todo = todo[:cap]
+        t0, done, backoffs = time.monotonic(), 0, 0
+        i = 0
+        while i < len(todo):
+            j = todo[i]
             mode = j.mode if j.mode in ("guest", "login", "window") else "guest"
             r = await self.reader(mode)
             url = self.spec.detail_url(self.spec, j, mode)
@@ -341,6 +360,18 @@ class SiteAgent:
             if block == "captcha":
                 self._log("human check while reading job pages - the remaining descriptions are skipped", level="warn")
                 break
+            if block == "blocked" and snap.status in (429, 403, 999):
+                # too many requests: wait, then the same page again (twice at most in a row)
+                if backoffs < len(BLOCK_BACKOFF):
+                    wait = BLOCK_BACKOFF[backoffs] if settings.page_delay_seconds > 0 else 0
+                    backoffs += 1
+                    self._log(f"{self.spec.label} asked to slow down (HTTP {snap.status}) - waiting {wait}s", level="warn")
+                    await asyncio.sleep(wait)
+                    continue
+                self._log(f"{self.spec.label} keeps refusing job pages - the remaining {len(todo) - i} keep their short text",
+                          level="warn")
+                break
+            backoffs = 0
             if block in ("login_wall", "blocked") and mode == "guest" and self.can_login:
                 r = await self.reader("login")
                 snap = await r.goto(j.url)
@@ -351,7 +382,15 @@ class SiteAgent:
                     for k, v in self.spec.parse_detail_extra(snap).items():
                         if v and not getattr(j, k):
                             setattr(j, k, v)
+            done += 1
+            i += 1
+            if done % 25 == 0 and i < len(todo):
+                per = (time.monotonic() - t0) / done
+                mins = round(per * (len(todo) - i) / 60)
+                self._log(f"read {i} of {len(todo)} job pages, about {mins} min left", done=i, total=len(todo))
             await r.pause()
+        if todo:
+            self._log(f"read {i} of {len(todo)} job pages")
 
     async def run(self, queries: list[Query]) -> SiteResult:
         res = SiteResult(site=self.site)

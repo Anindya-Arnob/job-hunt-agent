@@ -44,6 +44,7 @@ export default function Settings() {
         <Row label="Morning run" help="Search + score with the default filter profile. Runs only while the app is open."><label className="flex items-center gap-2"><input type="checkbox" checked={!!f.schedule_enabled} onChange={set('schedule_enabled')} />Enabled at <input type="time" className="input w-32" value={f.schedule_time} onChange={set('schedule_time')} /></label></Row>
         <Row label="Seconds between pages" help="Human pacing protects your accounts"><input type="number" step="0.5" className="input w-32" value={f.page_delay_seconds} onChange={set('page_delay_seconds')} /></Row>
         <Row label="Result pages per search" help="Searches that hit the limit are split automatically"><input type="number" className="input w-32" value={f.max_pages_per_search} onChange={set('max_pages_per_search')} /></Row>
+        <Row label="Job pages read per site" help="Full descriptions read per site and run (about 6 seconds each), most relevant first. The rest keep their short text. 300 ≈ 30 minutes"><input type="number" className="input w-32" value={f.max_details_per_site} onChange={set('max_details_per_site')} /></Row>
         <Row label="Guest browser hidden"><input type="checkbox" checked={!!f.headless_guest} onChange={set('headless_guest')} /></Row>
         <Row label="Job folder"><code className="text-xs">{f.job_dir}</code></Row>
       </div>
