@@ -178,7 +178,7 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
         except ValueError:
             raise LLMUnavailable((out.stderr or b"").decode("utf-8", "replace")[-300:] or "Claude Code gave no answer")
         if env.get("is_error"):
-            raise LLMUnavailable(str(env.get("result") or env.get("subtype"))[:300])
+            raise LLMUnavailable(cc.friendly(str(env.get("result") or env.get("subtype"))[:300]))
         _note_usage(node, env)
         text = env.get("result") or ""
         m_ = re.search(r"\{.*\}", text, re.S)

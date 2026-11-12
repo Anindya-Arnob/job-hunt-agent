@@ -169,3 +169,15 @@ def cli_model(choice: str) -> str:
 def api_model(choice: str, fallback: str) -> str:
     c = (choice or "").strip()
     return API_IDS.get(c, c) or fallback
+
+
+LOGIN_GONE = re.compile(r"oauth access token has expired|re-?authenticate|not logged in|please (run /)?log ?in|"
+                        r"invalid api key|failed to authenticate|\b401\b", re.I)
+
+
+def friendly(why: str) -> str:
+    """Claude Code's own error, said plainly when it is the login."""
+    if LOGIN_GONE.search(why or ""):
+        return ("Claude Code's login on this PC has expired. Open a terminal (PowerShell), type claude and press "
+                "Enter, and log in again if it asks (or type /login). Then run this again.")
+    return why

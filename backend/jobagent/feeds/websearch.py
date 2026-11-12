@@ -231,7 +231,10 @@ async def _call_cli(prompt: str, q: WebQuery) -> tuple[str, set[str], int, float
             raise WebSearchUnavailable("Claude Code took longer than 7 minutes")
     if proc.returncode != 0 and not out:
         why = (err or b"").decode("utf-8", "replace")[-300:] or "claude exited with an error"
-        raise (WebSearchUnavailable if AUTH_ERR.search(why) else RuntimeError)(why)
+        if AUTH_ERR.search(why):
+            from ..claude_code import friendly
+            raise WebSearchUnavailable(friendly(why))
+        raise RuntimeError(why)
     text, links, searches, cost, last_text = "", set(), 0, 0.0, ""
     for line in out.decode("utf-8", "replace").splitlines():
         try:
@@ -257,10 +260,14 @@ async def _call_cli(prompt: str, q: WebQuery) -> tuple[str, set[str], int, float
         elif typ == "result":
             text = ev.get("result") or text
             cost = float(ev.get("total_cost_usd") or 0.0)
+            if ev.get("is_error") and AUTH_ERR.search(str(ev.get("result") or "")):
+                from ..claude_code import friendly
+                raise WebSearchUnavailable(friendly(str(ev.get("result"))))   # logged out: stop all web searches
             if ev.get("is_error") and not text:
                 why = str(ev.get("result") or ev.get("subtype") or "Claude Code error")[:300]
                 if AUTH_ERR.search(why):
-                    raise WebSearchUnavailable(why)            # not logged in: stop all web searches
+                    from ..claude_code import friendly
+                    raise WebSearchUnavailable(friendly(why))  # not logged in: stop all web searches
                 raise RuntimeError(why)                        # e.g. error_max_turns: only this search failed
     if not text:                                               # ran out of steps: use its last written answer
         text = last_text

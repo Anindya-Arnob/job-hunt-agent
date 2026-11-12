@@ -210,3 +210,25 @@ def test_offline_page_reader_ignores_menu_and_category_links():
     snap = Snapshot("u", "u", 200, title="Jobs", text="x" * 500, links=links)
     assert [j.title for j in _fake_extract(snap, "wellfound").jobs] == ["Working Student Data Engineer"]
     assert [j.title for j in _fake_extract(snap, "xing").jobs] == ["Werkstudent Data Science (m/w/d)"]
+
+
+def test_expired_claude_login_stops_web_search_with_a_plain_message():
+    import asyncio
+    from jobagent.feeds import websearch as W
+    from jobagent.claude_code import friendly
+    msg = friendly("Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.")
+    assert "login on this PC has expired" in msg and "claude" in msg
+    calls = []
+
+    async def caller(prompt, q):
+        calls.append(q.label)
+        raise W.WebSearchUnavailable(msg)
+    site = next(iter(W.WEB_SITES))
+    qs = [W.WebQuery(site=site, location="Berlin", group=f"g{i}", terms=["Data Science"], type_words=["Werkstudent"], days=5)
+          for i in range(6)]
+    try:
+        asyncio.run(W.run_all(qs, caller=caller, parallel=1))
+        raised = ""
+    except W.WebSearchUnavailable as e:
+        raised = str(e)
+    assert "login on this PC has expired" in raised and len(calls) == 1      # the other searches were not started
