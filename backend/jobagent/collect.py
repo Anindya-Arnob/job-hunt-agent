@@ -174,6 +174,8 @@ def page(url: str, html: str) -> dict:
     q = Query.model_validate(cur["query"]) if cur.get("site") == site else Query(site=site, keywords="", location="")
     jobs, total = spec.parse_results(spec, _snap(url, html), q)
     for j in jobs:
+        j.place = j.place or q.place
+    for j in jobs:
         j.mode = "browser"
     fp = _profile(SESSION.get("fp_id")) or m.FilterProfile(name="default")
     known = known_url_keys()

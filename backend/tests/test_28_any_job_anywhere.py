@@ -108,3 +108,15 @@ def test_titles_and_places_you_type_yourself_still_work():
     qs = P.plan_site_queries("linkedin", ["Underwater Welder"], ["Full-time"], ["Springfield"], 7)
     assert [(q.keywords, q.location) for q in qs] == [("Underwater Welder", "Springfield")]
     assert location_matches("Springfield, IL", ["Springfield"]) is True
+
+
+def test_a_city_search_keeps_the_towns_around_it():
+    # seen on the real LinkedIn and Indeed: a search for Toronto also returns Brampton, Mississauga, Markham
+    fp = m.FilterProfile(**{**FP, "locations": ["Toronto"]})
+    near = RawJob(source="linkedin", title="DevOps Engineer", location="Brampton, Ontario, Canada", url="https://x/2",
+                  place="Toronto")
+    assert prefilter_reason(near, fp) is None
+    elsewhere = RawJob(source="linkedin", title="DevOps Engineer", location="Brampton, Ontario, Canada", url="https://x/3")
+    assert prefilter_reason(elsewhere, fp).startswith("Location not in filter")      # not from that search
+    abroad = RawJob(source="linkedin", title="DevOps Engineer", location="Seattle, WA", url="https://x/4", place="Toronto")
+    assert prefilter_reason(abroad, fp).startswith("Location not in filter")         # another country: not nearby

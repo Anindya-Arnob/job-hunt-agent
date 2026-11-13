@@ -35,6 +35,19 @@ def location_matches(location: str, allowed: list[str], work_mode: str = "") -> 
     return any(places.location_hits(location, p) for p in allowed if p != "Remote")
 
 
+def near_search_place(location: str, place: str) -> bool:
+    """A search for a city also brings jobs in towns around it (Toronto -> Mississauga, Berlin -> Potsdam):
+    kept when they are in the same country as that city."""
+    from .. import places
+    if not place:
+        return False
+    p = places.find(place)
+    if p.kind != "city":
+        return False
+    c = places.country_of(location)
+    return bool(c and c.name == p.country)
+
+
 # --------------------------------------------------------------- filtering ---
 FIELD_TITLE = R.DATA_TITLE        # earlier name, kept for the tests and other modules
 
@@ -86,6 +99,8 @@ def prefilter_reason(job: RawJob, fp: m.FilterProfile, today: Optional[date] = N
         if w and w.lower() in tl:
             return f"Excluded keyword in title ({w})"
     lm = location_matches(job.location, fp.locations, job.work_mode_hint)
+    if lm is False and near_search_place(job.location, job.place):
+        lm = True
     if lm is False:
         return f"Location not in filter ({job.location})"
     return None

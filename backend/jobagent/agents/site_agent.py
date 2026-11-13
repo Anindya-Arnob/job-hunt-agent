@@ -414,6 +414,7 @@ class SiteAgent:
                     res.login_expired = True
                     self.can_login = False
                 for j in jobs:
+                    j.place = j.place or q.place
                     k = normalize_url(j.url)
                     if k not in all_jobs:
                         all_jobs[k] = j

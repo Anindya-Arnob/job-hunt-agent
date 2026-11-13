@@ -29,6 +29,7 @@ class RawJob(BaseModel):
     work_mode_hint: str = ""
     salary: str = ""
     query: str = ""
+    place: str = ""                # the place of your search that found it (a city search also returns nearby towns)
     mode: str = "guest"            # guest / login / feed - how it was found
     external_id: str = ""          # e.g. Bundesagentur refnr
     prefilter_reason: str = ""     # set when excluded before fetching the description
