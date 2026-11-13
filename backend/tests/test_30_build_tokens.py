@@ -1,0 +1,81 @@
+"""Building CVs without burning tokens: a CV that is only too long is shortened by the app (no new Claude
+rewrite), and the same job is never built twice at the same time (the Apply screen lost track of a running
+build after you left it, so pressing Rebuild again started a second one)."""
+import asyncio
+
+import pytest
+from sqlmodel import select
+
+from jobagent import db, models as m
+from jobagent.docs.pdf import find_soffice
+from jobagent.graphs import build_graph as B
+from jobagent.schemas import CVContent
+from jobagent.steps import write as W
+
+from test_10_build_graph import setup  # noqa: F401  (fixture)
+
+pytestmark = pytest.mark.skipif(find_soffice() is None, reason="LibreOffice not installed")
+
+
+def test_trim_cuts_the_weakest_bullets_and_keeps_every_item():
+    cv = CVContent(tagline="t", summary="s", skills=[{"category": "Tools", "items": [f"Tool{i}" for i in range(9)]}],
+                   experience=[{"title": "Intern", "bullets": ["Built RAG with LangChain", "Made coffee", "Wrote PyTorch code"]}],
+                   projects=[{"name": "P1", "bullets": ["LLM fine-tuning with LoRA", "Cleaned the garage"]},
+                             {"name": "P2", "bullets": ["RAG demo"]}],
+                   education=[{"degree": "M.Sc."}])
+    kw = {"RAG": 3, "LangChain": 2, "PyTorch": 2, "LoRA": 2, "LLM": 3}
+    made = B._trim_once(cv, kw, 2, 2)
+    assert made == 2
+    assert "Made coffee" not in cv.experience[0].bullets and "Cleaned the garage" not in cv.projects[0].bullets
+    assert all(len(p.bullets) >= 1 for p in cv.projects) and len(cv.experience[0].bullets) >= 2
+    # nothing left to cut from the bullets: the longest skill group gives up its least useful items
+    assert B._trim_once(cv, kw, 3, 2) == 3 and len(cv.skills[0].items) == 6
+
+
+def test_a_too_long_cv_is_shortened_without_a_rewrite(setup, monkeypatch):  # noqa: F811
+    calls = []
+    real = W.write_cv
+
+    def long_writer(*a, **kw):
+        calls.append(1)
+        cv = real(*a, **kw)
+        for it in cv.experience + cv.projects:          # far too much text for one page
+            it.bullets = it.bullets + [f"Extra detail {w} about the work done in this item, written at length "
+                                       f"to fill the page with more words than fit" for w in "abcdef"]
+        return cv
+    monkeypatch.setattr(W, "write_cv", long_writer)
+    out = asyncio.run(B.start_build([setup["good"]], rebuild=True))
+    with db.session_scope() as s:
+        doc = s.exec(select(m.Document).where(m.Document.job_id == setup["good"], m.Document.kind == "cv")).first()
+    msgs = [e["message"] for e in B.events.recent(out["run_id"], 500) if "Shortened the CV" in str(e.get("message", ""))]
+    assert len(calls) == 1, "one Claude call only: the app cut the extra lines itself"
+    assert doc and next(c for c in doc.qa_results if c["name"] == "Exactly 1 page")["passed"]
+    assert msgs
+
+
+def test_the_same_job_is_not_built_twice_at_once(setup, monkeypatch):  # noqa: F811
+    from fastapi.testclient import TestClient
+    from jobagent.api import runs
+    from jobagent.api.main import app
+    gate = {}
+
+    async def slow_build(job_ids, cv_profile_id, rebuild, run_id):
+        gate.setdefault("started", []).append(job_ids)
+        await asyncio.sleep(1.5)
+        return {"run_id": run_id, "results": []}
+    monkeypatch.setattr(runs.build_graph, "start_build", slow_build)
+    with TestClient(app) as c:
+        a = c.post("/api/build", json={"job_ids": [setup["good"]], "rebuild": True}).json()
+        active = c.get("/api/build/active").json()
+        assert [b["job_id"] for b in active] == [setup["good"]] and active[0]["title"].startswith("Working Student")
+        b = c.post("/api/build", json={"job_ids": [setup["good"]], "rebuild": True}).json()
+        assert b["run_id"] == a["run_id"] and b["already_building"] == [setup["good"]]
+        both = c.post("/api/build", json={"job_ids": [setup["good"], setup["accent"]], "rebuild": True}).json()
+        assert both["already_building"] == [setup["good"]] and both["run_id"] != a["run_id"]
+        assert gate["started"] == [[setup["good"]], [setup["accent"]]]       # each job once
+        import time
+        for _ in range(40):
+            if not c.get("/api/build/active").json():
+                break
+            time.sleep(0.1)
+        assert c.get("/api/build/active").json() == []

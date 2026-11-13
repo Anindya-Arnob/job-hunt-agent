@@ -4,6 +4,7 @@ import { ChevronDown, Hammer, Play, SlidersHorizontal } from 'lucide-react'
 import { api, fmtTime } from '../api'
 import { CheckList, Empty, ScoreBar, StatusBadge, useAsync, useToast, VerdictBadge } from '../ui'
 import { useEvents, useOnEvent } from '../events'
+import { BuildingNote, useActiveBuilds } from '../components/ActiveBuilds'
 import BuildOptions from '../components/BuildOptions'
 import { AtsBadge } from '../components/AtsPanel'
 
@@ -15,6 +16,7 @@ export default function BuildQueue() {
   const [picked, setPicked] = useState([])
   const [showOpts, setShowOpts] = useState(false)
   const { events } = useEvents()
+  const builds = useActiveBuilds()
   useOnEvent((ev) => { if (['run_done', 'run_failed', 'review', 'run_started'].includes(ev.type)) { runs.reload(); docs.reload(); cands.reload() } }, [])
 
   const buildRuns = (runs.data || []).filter((r) => r.kind === 'build')
@@ -28,8 +30,11 @@ export default function BuildQueue() {
   const go = async () => {
     try {
       if (paused) { await api.post(`/api/build/${paused.id}/resume`, { job_ids: picked }) }
-      else { await api.post('/api/build', { job_ids: picked }) }
-      toast(`Building ${picked.length} CV(s)`); runs.reload()
+      else {
+        const r = await api.post('/api/build', { job_ids: picked })
+        if ((r.already_building || []).length) toast(`${r.already_building.length} job(s) were already being built – not started twice`, 'warn')
+      }
+      toast(`Building ${picked.length} CV(s)`); runs.reload(); builds.reload()
     } catch (e) { toast(e.message, 'error') }
   }
   const startReview = async () => { await api.post('/api/build', { job_ids: [] }); runs.reload() }
@@ -49,6 +54,15 @@ export default function BuildQueue() {
       <button className="btn-outline" onClick={() => setShowOpts(!showOpts)}><SlidersHorizontal size={14} />Build options: model, projects, GitHub, ATS
         <ChevronDown size={14} className={`transition ${showOpts ? 'rotate-180' : ''}`} /></button>
       {showOpts && <BuildOptions compact />}
+      {builds.list.length > 0 && (
+        <div className="card" data-testid="being-built">
+          <div className="card-h">Being built right now ({builds.list.length})<span className="text-xs font-normal muted">also when you started it on another screen</span></div>
+          <div className="divide-y divide-slate-100">
+            {builds.list.map((b) => (
+              <div key={b.job_id} className="px-4 py-2.5 text-sm"><div className="font-semibold">{b.company} – {b.title}</div><BuildingNote b={b} /></div>
+            ))}
+          </div>
+        </div>)}
       <div className="grid gap-5 xl:grid-cols-5">
         <div className="card xl:col-span-3">
           <div className="card-h">{paused ? 'Waiting for your review – tick the jobs to build' : 'Ready to build (score 40+)'}

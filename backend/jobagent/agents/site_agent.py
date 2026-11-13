@@ -104,6 +104,7 @@ class SiteAgent:
         self.blocked_in_row = 0
         self.blocked_given_up = False         # the site refused several searches in a row -> stop for this run
         self.human_checks = 0
+        self.details_read = 0                 # job pages read this run (all rounds): MAX_DETAILS_PER_SITE is per run
 
     # ---------------------------------------------------------- readers ---
     async def reader(self, mode: str) -> PageReader:
@@ -345,10 +346,13 @@ class SiteAgent:
     async def fetch_details(self, jobs: list[RawJob]) -> None:
         todo = [j for j in self.detail_order(jobs) if not j.description]
         cap = max(0, settings.max_details_per_site)
-        if cap and len(todo) > cap:
-            self._log(f"reading the {cap} most relevant of {len(todo)} job pages this run "
-                      f"(the other {len(todo) - cap} keep their short text; MAX_DETAILS_PER_SITE in Settings)")
-            todo = todo[:cap]
+        if cap:
+            left = max(0, cap - self.details_read)
+            if len(todo) > left:
+                self._log(f"reading the {left} most relevant of {len(todo)} job pages"
+                          + (f" ({self.details_read} read already this run)" if self.details_read else "")
+                          + f" - the other {len(todo) - left} keep their short text (job pages per site in Settings: {cap})")
+                todo = todo[:left]
         t0, done, backoffs = time.monotonic(), 0, 0
         i = 0
         self.on_progress(phase="reading", pages_done=0, pages_total=len(todo))
@@ -390,6 +394,7 @@ class SiteAgent:
                             setattr(j, k, v)
             done += 1
             i += 1
+            self.details_read += 1
             self.on_progress(phase="reading", pages_done=i, pages_total=len(todo))
             if done % 25 == 0 and i < len(todo):
                 per = (time.monotonic() - t0) / done

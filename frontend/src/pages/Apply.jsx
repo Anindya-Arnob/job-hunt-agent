@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Mai
 import { api, fileUrl, fmtDate, fmtDateTime } from '../api'
 import { Empty, Tabs, useAsync, useToast } from '../ui'
 import { useOnEvent } from '../events'
+import { BuildingNote, useActiveBuilds } from '../components/ActiveBuilds'
 
 function ScorePill({ score }) {
   if (score === null || score === undefined) return <span className="text-slate-300">–</span>
@@ -55,10 +56,10 @@ function Live({ st, onControl }) {
   )
 }
 
-function SureButton({ className, title, onClick, children, ask = 'Sure? Click again' }) {
+function SureButton({ className, title, onClick, children, ask = 'Sure? Click again', disabled = false }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t) }, [armed])
-  return <button className={className} title={title} onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!armed) return setArmed(true); setArmed(false); onClick() }}>{armed ? ask : children}</button>
+  return <button className={className} title={title} disabled={disabled} onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (disabled) return; if (!armed) return setArmed(true); setArmed(false); onClick() }}>{armed ? ask : children}</button>
 }
 
 const ATTEMPT = (a) => !a ? null : a.status === 'applied' ? null
@@ -104,25 +105,24 @@ export default function Apply() {
   const act = useAsync(() => api.get('/api/ext/active'))
   const [sel, setSel] = useState(null)
   const [tab, setTab] = useState('todo')
-  const [building, setBuilding] = useState({})          // run_id -> [job ids]
+  const builds = useActiveBuilds()                      // asked from the app: still right after you come back
   const toast = useToast()
   const refresh = async () => setSt(await api.get('/api/apply/state'))
   useEffect(() => { refresh() }, [])
   useEffect(() => { if (q.data && sel === null) setSel(new Set(q.data.jobs.filter((j) => !j.applied).slice(0, q.data.limit).map((j) => j.id))) }, [q.data]) // eslint-disable-line
   useOnEvent((ev) => {
     if (ev.type === 'apply') { refresh(); act.reload(); ext.reload(); if (ev.result || ['done', 'stopped'].includes(ev.state)) { q.reload(); hist.reload() } }
-    if (['run_done', 'run_failed', 'run_cancelled'].includes(ev.type) && ev.run_id) {
-      setBuilding((b) => { if (!b[ev.run_id]) return b; const n = { ...b }; delete n[ev.run_id]; return n })
-      q.reload()
-    }
+    if (['run_done', 'run_failed', 'run_cancelled'].includes(ev.type) && ev.run_id) q.reload()
   }, [])
-  const rebuilding = useMemo(() => new Set(Object.values(building).flat()), [building])
   const rebuild = async (ids) => {
-    if (!ids.length) return
+    ids = ids.filter((id) => !builds.byJob[id])
+    if (!ids.length) { toast('Already being built – see the line under the job', 'warn'); return }
     try {
       const r = await api.post('/api/build', { job_ids: ids, rebuild: true })
-      setBuilding((b) => ({ ...b, [r.run_id]: ids }))
-      toast(`Rebuilding CV + cover letter for ${ids.length} job(s) – about 1–3 minutes each. Progress on the Runs page.`)
+      const started = ids.length - (r.already_building || []).length
+      if (started) toast(`Rebuilding CV + cover letter for ${started} job(s), one after another. Progress shows under each job.`)
+      if ((r.already_building || []).length) toast(`${r.already_building.length} job(s) were already being built – not started twice`, 'warn')
+      builds.reload()
     } catch (e) { toast(e.message, 'error') }
   }
   const notApplied = async (id) => {
@@ -194,7 +194,7 @@ export default function Apply() {
         {!jobs.length ? <Empty title={tab === 'applied' ? 'Nothing applied yet' : 'Nothing to apply to'}>{tab === 'applied' ? 'Jobs you sent show up here.' : 'Build CVs for jobs first (Job board → Build CV).'}</Empty> : (
           <div className="divide-y divide-slate-100">
             {jobs.map((j) => {
-              const busy = rebuilding.has(j.id)
+              const busy = !!builds.byJob[j.id]
               const att = ATTEMPT(j.last_attempt)
               return (
               <label key={j.id} className={`grid cursor-pointer grid-cols-[24px_48px_minmax(0,1fr)_96px_110px_96px_170px_24px] items-center gap-3 px-5 py-3 ${st?.current?.id === j.id && st?.running ? 'bg-teal-50' : j.applied ? 'bg-emerald-50/30 hover:bg-emerald-50/60' : 'hover:bg-slate-50'}`}>
@@ -203,7 +203,8 @@ export default function Apply() {
                 <div className="min-w-0"><div className="truncate font-semibold text-slate-800">{j.title}</div>
                   <div className="truncate text-xs text-slate-500">{j.company}{j.location ? ` · ${j.location}` : ''}
                     {j.applied && <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">applied {fmtDate(j.applied_at)}</span>}
-                    {!j.applied && att && <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200" title={`Last try: ${fmtDateTime(j.last_attempt.at)}`}>last try: {att}</span>}</div></div>
+                    {!j.applied && att && <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200" title={`Last try: ${fmtDateTime(j.last_attempt.at)}`}>last try: {att}</span>}</div>
+                  <BuildingNote b={builds.byJob[j.id]} /></div>
                 <span className="truncate text-xs text-slate-500">{j.job_type || '–'}</span>
                 <span className="flex gap-2 text-xs">
                   {busy ? <span className="inline-flex items-center gap-1 text-slate-400"><Loader2 size={12} className="animate-spin" />writing…</span> : <>
@@ -211,7 +212,7 @@ export default function Apply() {
                   {j.letter && <a className="inline-flex items-center gap-1 text-teal-600 hover:underline" href={fileUrl(j.letter)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Mail size={12} />Letter</a>}</>}
                 </span>
                 <SureButton className="btn border border-slate-200 bg-slate-50 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50" ask="Rebuild?"
-                  title="Write a new CV and cover letter for this job" onClick={() => !busy && rebuild([j.id])}>
+                  title={busy ? 'Being built right now' : 'Write a new CV and cover letter for this job'} disabled={busy} onClick={() => !busy && rebuild([j.id])}>
                   {busy ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}Rebuild</SureButton>
                 {j.applied
                   ? <SureButton className="btn border border-amber-200 bg-slate-50 py-1.5 text-xs text-amber-700 hover:bg-amber-50" ask="Not sent? Click again"

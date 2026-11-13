@@ -395,7 +395,9 @@ export default function JobBoard() {
   const buildSelected = async () => {
     try {
       const r = await api.post('/api/build', { job_ids: selected.map((s) => s.id) })
-      toast(`Building ${selected.length} CV(s) – run #${r.run_id}`); nav('/build')
+      const already = (r.already_building || []).length
+      toast(already ? `${selected.length - already} CV(s) started; ${already} already being built (not started twice)` : `Building ${selected.length} CV(s) – run #${r.run_id}`)
+      nav('/build')
     } catch (e) { toast(e.message, 'error') }
   }
   const setStatusSelected = async (status) => {
@@ -640,7 +642,10 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
   const b = j.breakdown
   const patch = async (body) => { await api.patch(`/api/jobs/${id}`, body); await load(); onChanged && onChanged() }
   const build = async (rebuild = false) => {
-    try { await api.post('/api/build', { job_ids: [id], rebuild }); toast('Building CV and cover letter'); nav('/build') }
+    try {
+      const r = await api.post('/api/build', { job_ids: [id], rebuild })
+      toast((r.already_building || []).length ? 'Already being built – not started twice' : 'Building CV and cover letter'); nav('/build')
+    }
     catch (e) { toast(e.message, 'error') }
   }
   const bars = b && [['Skills & tools', b.skills, 40], ['Experience & projects', b.experience, 25], ['Title fit', b.title_fit, 10],

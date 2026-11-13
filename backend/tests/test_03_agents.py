@@ -329,6 +329,7 @@ def test_job_pages_most_relevant_first_with_a_cap_and_progress(monkeypatch):
     agent = SA.SiteAgent.__new__(SA.SiteAgent)
     agent.site, agent.spec, agent.start_mode, agent.can_login = "linkedin", SA.SITES["linkedin"], "guest", False
     agent.emit = lambda e: logs.append(e["message"])
+    agent.details_read = 0
 
     async def reader(mode):
         return Reader()
@@ -342,3 +343,8 @@ def test_job_pages_most_relevant_first_with_a_cap_and_progress(monkeypatch):
     assert len(opened) == 30 and "999" in opened[0]                   # the relevant one first, then the cap
     assert any("most relevant of 61" in m for m in logs) and any("read 25 of 30 job pages, about" in m for m in logs)
     assert logs[-1] == "read 30 of 30 job pages"
+    # narrower searches find more jobs later in the same run: the limit is for the whole run, not each round
+    more = [RawJob(source="linkedin", title=f"Data Analyst {i}", company="Z", url=f"https://www.linkedin.com/jobs/view/{5000 + i}")
+            for i in range(20)]
+    asyncio.run(agent.fetch_details(more))
+    assert len(opened) == 30 and any("30 read already this run" in m for m in logs)

@@ -21,6 +21,34 @@ class Busy(RuntimeError):
     pass
 
 
+# jobs whose CV is being built right now: job id -> {"run_id", "started"}. Every screen shows these, and the
+# same job is never built twice at the same time (that cost tokens twice and nobody could see it).
+BUILDING: dict[int, dict] = {}
+
+
+def building() -> dict[int, dict]:
+    for jid in [j for j, b in BUILDING.items() if b["run_id"] not in _tasks or _tasks[b["run_id"]].done()]:
+        BUILDING.pop(jid, None)
+    return BUILDING
+
+
+def active_builds() -> list[dict]:
+    """For the screens: each job being built, the run, and what that run said last about it."""
+    out = []
+    for jid, b in sorted(building().items(), key=lambda x: x[1]["started"]):
+        evs = [e for e in events.recent(b["run_id"], 300) if e.get("type") == "build"]
+        mine = [e for e in evs if e.get("job_id") == jid]
+        current = next((e.get("job_id") for e in reversed(evs) if e.get("job_id")), None)
+        with db.session_scope() as ss:
+            job = ss.get(m.Job, jid)
+            company, title = (job.company, job.title) if job else ("", "")
+        out.append({"job_id": jid, "run_id": b["run_id"], "started": b["started"], "company": company, "title": title,
+                    "state": "building" if current == jid else ("waiting" if not mine else "building"),
+                    "last": (mine[-1].get("message") if mine else "waiting for its turn")[:200],
+                    "attempt": sum(1 for e in mine if str(e.get("message", "")).startswith("CV attempt"))})
+    return out
+
+
 def running(kind: Optional[str] = None) -> list[int]:
     with db.session_scope() as s:
         q = select(m.Run).where(m.Run.status == "running")
@@ -91,14 +119,31 @@ def _kind(run_id: int) -> str:
         return r.kind if r else ""
 
 
-async def start_build(job_ids: Optional[list[int]], cv_profile_id: Optional[int] = None, rebuild: bool = False) -> int:
+def _register(run_id: int, job_ids: list[int]) -> None:
+    import time
+    for j in job_ids:
+        BUILDING[j] = {"run_id": run_id, "started": time.time()}
+
+
+async def start_build(job_ids: Optional[list[int]], cv_profile_id: Optional[int] = None,
+                      rebuild: bool = False) -> tuple[int, list[int]]:
+    """Returns the run and the jobs left out because they are being built already."""
+    active = building()
+    already = [j for j in (job_ids or []) if j in active]
+    todo = [j for j in (job_ids or []) if j not in active]
+    if job_ids and not todo:
+        return active[already[0]]["run_id"], already
     run_id = _new_run("build")
-    _track(run_id, build_graph.start_build(job_ids, cv_profile_id, rebuild, run_id=run_id))
-    return run_id
+    _register(run_id, todo)
+    _track(run_id, build_graph.start_build(todo or None, cv_profile_id, rebuild, run_id=run_id))
+    return run_id, already
 
 
 async def resume_build(run_id: int, job_ids: list[int]) -> int:
-    _track(run_id, build_graph.resume_build(run_id, job_ids))
+    active = building()
+    todo = [j for j in job_ids if j not in active]
+    _register(run_id, todo)
+    _track(run_id, build_graph.resume_build(run_id, todo))
     return run_id
 
 

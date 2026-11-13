@@ -303,6 +303,36 @@ def check_cv(state: BuildState) -> dict:
     return {"issues": res.issues if not res.passed else []}
 
 
+def _trim_once(cv: CVContent, kw: dict, n: int, min_projects: int) -> int:
+    """Cut up to n lines from the CV without Claude: the bullets that carry the fewest job keywords, from the
+    items with the most bullets (each item keeps at least one), then the last items of the longest skill group.
+    Returns how many cuts were made."""
+    from ..docs.ats import hit
+
+    def value(b: str) -> int:
+        return sum(w for t, w in kw.items() if hit(t, b))
+    cuts = 0
+    for _ in range(n):
+        items = [(it, 2) for it in cv.experience] + [(it, 1) for it in cv.projects[:max(min_projects, 1)]] \
+            + [(it, 1) for it in cv.projects[max(min_projects, 1):]]
+        cand = [(it, keep) for it, keep in items if len(it.bullets) > keep]
+        if cand:
+            it = max(cand, key=lambda x: (len(x[0].bullets), -min(value(b) for b in x[0].bullets)))[0]
+            weakest = min(range(len(it.bullets)), key=lambda i: (value(it.bullets[i]), -len(it.bullets[i]), -i))
+            it.bullets.pop(weakest)
+            cuts += 1
+            continue
+        groups = [g for g in cv.skills if len(g.items) > 4]
+        if groups:
+            g = max(groups, key=lambda g: len(g.items))
+            weakest = min(range(len(g.items)), key=lambda i: (value(g.items[i]), -i))
+            g.items.pop(weakest)
+            cuts += 1
+            continue
+        break
+    return cuts
+
+
 def render_qa(state: BuildState) -> dict:
     from ..docs import ats
     prof = _truth(state)
@@ -326,6 +356,26 @@ def render_qa(state: BuildState) -> dict:
         one_page = next((c for c in checks if c.name == "Exactly 1 page"), None)
         if one_page is None or one_page.passed:
             break
+    # still too long: shorten it here (seconds, no tokens) instead of a whole new Claude rewrite (minutes, tokens)
+    trimmed = 0
+    kw = ats.keywords(jw)
+    least = min(3, wanted)
+    for _ in range(12):
+        one_page = next((c for c in checks if c.name == "Exactly 1 page"), None)
+        if pdf is None or one_page is None or one_page.passed:
+            break
+        over = qa.overflow_lines(pdf)
+        made = _trim_once(cv, kw, max(1, over // 2), least)
+        if not made:
+            break
+        trimmed += made
+        d = render_cv(cv, prof, style, tmp / "cv.docx", compact=2)
+        pdf = to_pdf(d)
+        checks = qa.check_cv(cv, prof, d, pdf, style, wanted)
+    if trimmed:
+        _emit(state, f"Shortened the CV to one page without a rewrite ({trimmed} line(s) cut: the bullets with the "
+                     f"fewest job keywords)" if all(c.passed for c in checks if c.name == "Exactly 1 page")
+              else f"Cut {trimmed} line(s), still too long")
     after = ats.score(jw, cv, prof)
     pdf_text = None
     if pdf is not None:
@@ -344,7 +394,8 @@ def render_qa(state: BuildState) -> dict:
                  "; ".join(_short_issue(c) for c in checks if not c.passed and not c.soft) or "; ".join(issues)[:200])
           + ("" if not issues or state.get("attempts", 1) >= settings.max_build_attempts else " – rewriting"))
     _emit(state, f"ATS score: {state.get('ats_before', {}).get('score', '?')} → {after['score']}")
-    return {"qa_cv": [c.as_dict() for c in checks], "issues": issues, "level": level, "ats_after": after}
+    return {"qa_cv": [c.as_dict() for c in checks], "issues": issues, "level": level, "ats_after": after,
+            "cv": cv.model_dump()}
 
 
 def route_cv(state: BuildState) -> str:

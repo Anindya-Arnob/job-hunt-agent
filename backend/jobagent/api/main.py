@@ -1068,7 +1068,14 @@ class BuildIn(BaseModel):
 async def start_build(body: BuildIn):
     if not cvs.get_main() and not body.cv_profile_id:
         _err(ValueError("Upload your main CV first (My CV screen)."))
-    return {"run_id": await runs.start_build(body.job_ids or None, body.cv_profile_id, body.rebuild)}
+    run_id, already = await runs.start_build(body.job_ids or None, body.cv_profile_id, body.rebuild)
+    return {"run_id": run_id, "already_building": already}
+
+
+@app.get("/api/build/active")
+def builds_now():
+    """Jobs whose CV is being built right now (also when you left the screen and came back)."""
+    return runs.active_builds()
 
 
 class ResumeBuildIn(BaseModel):
