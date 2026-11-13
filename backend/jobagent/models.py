@@ -147,6 +147,8 @@ class FilterProfile(SQLModel, table=True):
     exclude_companies: list = Field(default_factory=list, sa_column=Column(JSON))
     min_salary: int = 0
     is_default: bool = False
+    # search plan: {"sites": {site: {"searches", "narrow"}}, "places": {place: 1-3}, "fields": {role: 1-3}}
+    plan: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
 
 class Connection(SQLModel, table=True):

@@ -228,7 +228,14 @@ def _tombstones(s) -> tuple[set[str], set[str]]:
 def known_url_keys() -> set[str]:
     """Jobs already in the database or deleted by you: their descriptions are not fetched again."""
     with db.session_scope() as s:
-        keys = {k for k in s.exec(select(m.Job.url_key)).all() if k}
+        keys = set()
+        for url_key, links in s.exec(select(m.Job.url_key, m.Job.links)).all():
+            if url_key:
+                keys.add(url_key)
+            for u in links or []:                  # the same job found on another site has its own address
+                k = normalize_url(u)
+                if k:
+                    keys.add(k)
         keys |= _tombstones(s)[0]
         return keys
 

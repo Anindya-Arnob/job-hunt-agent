@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import operator
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Annotated, Any, Optional, TypedDict
@@ -54,6 +55,7 @@ class SearchState(TypedDict, total=False):
     raw_jobs: Annotated[list, operator.add]
     outcomes: Annotated[list, operator.add]
     errors: Annotated[list, operator.add]
+    saved: Annotated[list, operator.add]      # counts of each source that saved its jobs as soon as it finished
     counts: dict
     new_ids: list
     export_path: str
@@ -87,8 +89,7 @@ def plan_queries(state: SearchState) -> dict:
     sq = {}
     for site in BROWSER_SITES:
         if site in (fp.sources or []):
-            qs = planner.plan_site_queries(site, fp.roles, fp.job_types, fp.locations, fp.days,
-                                           fp.work_modes, fp.keywords_in)
+            qs = planner.plan_for_profile(site, fp)
             sq[site] = [q.model_dump() for q in qs]
     fq = planner.plan_feed_queries(fp.roles, fp.job_types, fp.locations) if "arbeitsagentur" in fp.sources else []
     total = sum(len(v) for v in sq.values()) + len(fq)
@@ -161,10 +162,10 @@ async def web_search(payload: dict) -> dict:
         say(f"web search stopped: {e}", level="warn")
     except llm.BudgetExceeded as e:
         errors.append(f"web search: {e}")
-    progress.source(run_id, "websearch", done=True, jobs=len(jobs))
+    out = await _finish_source(run_id, fp.id, "websearch", "Web search", jobs, outcomes, errors)
     events.emit({"type": "site_done", "site": "websearch", "jobs": len(jobs),
                  "message": f"Web search: {len(jobs)} jobs"}, run_id=run_id)
-    return {"raw_jobs": [j.model_dump(mode="json") for j in jobs], "outcomes": outcomes, "errors": errors}
+    return out
 
 
 def _get_start_mode(site: str) -> str:
@@ -200,12 +201,14 @@ async def site_agent(payload: dict) -> dict:
                     run_id=run_id)
         return await events.wait_for(f"captcha:{run_id}:{site_name}", timeout=300)
 
+    narrow_left = [planner.site_plan(fp.plan, site)["narrow"]]   # narrower searches still allowed this run
     base = {"searched": 0, "new": 0, "last_new": 0}       # earlier rounds (narrower searches add a round)
 
     def on_progress(**kw):
         if "searched" in kw:
             base["last_new"] = kw.get("new_seen", 0)
-            kw.update(searched=base["searched"] + kw["searched"], searches=base["searched"] + kw["searches"],
+            kw.update(searched=base["searched"] + kw["searched"],
+                      searches=base["searched"] + kw["searches"] + narrow_left[0],
                       new_seen=base["new"] + base["last_new"])
         progress.source(run_id, site, **kw)
 
@@ -214,6 +217,7 @@ async def site_agent(payload: dict) -> dict:
                       prefilter=lambda j: prefilter_reason(j, fp), reader_factory=READER_FACTORY,
                       start_mode=_get_start_mode(site), on_progress=on_progress)
     queries = [Query(**q) for q in payload["queries"]]
+    searched_keys = {q.key for q in queries}
     jobs: list[RawJob] = []
     outcomes: list[dict] = []
     errors: list[str] = []
@@ -235,20 +239,38 @@ async def site_agent(payload: dict) -> dict:
                 _set_start_mode(site, "window")      # next run opens the window straight away
             if res.login_expired:
                 connections.set_status(site, "expired", "Session expired during a run - log in again")
-            next_queries = []
+            rows = []
             for o in res.outcomes:
-                d = {"site": site, "query": o.query.keywords, "location": o.query.location, "mode": o.mode,
-                     "status": o.status, "reported": o.reported, "collected": o.collected, "pages": o.pages,
-                     "error": o.error}
-                if o.status == "limit" and round_ < MAX_SPLIT_ROUNDS:
-                    children = planner.split_query(o.query)
-                    if children:
+                rows.append(({"site": site, "query": o.query.keywords, "location": o.query.location, "mode": o.mode,
+                              "status": o.status, "reported": o.reported, "collected": o.collected, "pages": o.pages,
+                              "error": o.error}, o))
+            # narrower searches: the searches with the most jobs left unread first, until your number is used up
+            next_queries, over = [], 0
+            stopped = agent.human_check_given_up or agent.blocked_given_up or agent.refuses_automation
+            if round_ < MAX_SPLIT_ROUNDS and not stopped:
+                limited = [(d, o) for d, o in rows if o.status == "limit"]
+                limited.sort(key=lambda x: -((x[1].reported or 0) - x[1].collected))
+                for d, o in limited:
+                    children = [c for c in planner.split_query(o.query) if c.key not in searched_keys]
+                    for c in children:
+                        c.place = o.query.place
+                    take = children[:narrow_left[0]]
+                    if take:
                         d["status"] = "split"
-                        next_queries += children
-                outcomes.append(d)
+                        next_queries += take
+                        narrow_left[0] -= len(take)
+                        searched_keys |= {c.key for c in take}
+                    elif children:
+                        over += 1
+            outcomes += [d for d, _ in rows]
             if next_queries:
                 events.emit({"type": "agent", "site": site,
-                             "message": f"{len(next_queries)} narrower searches (results hit the site limit)"}, run_id=run_id)
+                             "message": f"{len(next_queries)} narrower searches (results hit the site limit)"
+                                        + (f"; {narrow_left[0]} left for later rounds" if narrow_left[0] else "")}, run_id=run_id)
+            if over:
+                events.emit({"type": "agent", "site": site, "message":
+                             f"{over} more searches had more jobs than the app reads, but this run's narrower searches "
+                             f"are used up (Search plan on the Search screen)"}, run_id=run_id)
             queries = next_queries
     except llm.BudgetExceeded as e:
         errors.append(f"{site}: {e}")
@@ -257,10 +279,12 @@ async def site_agent(payload: dict) -> dict:
         errors.append(f"{site}: {e}")
         outcomes.append({"site": site, "query": "(agent)", "location": "", "mode": "guest", "status": "failed",
                          "reported": None, "collected": 0, "pages": 0, "error": str(e)[:300]})
-    progress.source(run_id, site, done=True, jobs=len(jobs))
+    events.emit({"type": "agent", "site": site, "message": f"{SITES[site].label}: {len(jobs)} jobs found - saving them"},
+                run_id=run_id)
+    out = await _finish_source(run_id, fp.id, site, SITES[site].label, jobs, outcomes, errors)
     events.emit({"type": "site_done", "site": site, "jobs": len(jobs),
                  "message": f"{SITES[site].label}: {len(jobs)} jobs"}, run_id=run_id)
-    return {"raw_jobs": [j.model_dump(mode="json") for j in jobs], "outcomes": outcomes, "errors": errors}
+    return out
 
 
 async def feeds(payload: dict) -> dict:
@@ -320,18 +344,125 @@ async def feeds(payload: dict) -> dict:
                     rec(src, "latest", len(got))
                 except Exception as e:
                     rec(src, "latest", 0, "failed", err=str(e))
-    progress.source(run_id, "feeds", done=True, jobs=len(jobs))
+    out = await _finish_source(run_id, fp.id, "feeds", "Job feeds", jobs, outcomes, errors)
     events.emit({"type": "site_done", "site": "feeds", "jobs": len(jobs),
                  "message": f"Job feeds: {len(jobs)} jobs"}, run_id=run_id)
-    return {"raw_jobs": [j.model_dump(mode="json") for j in jobs], "outcomes": outcomes, "errors": errors}
+    return out
+
+
+NUMERIC = ("found", "new", "duplicates", "excluded", "no_description", "previously_deleted", "classified",
+           "full_time_excluded", "needs_review", "scored")
+_SAVE_LOCK = threading.Lock()               # one source saves at a time (SQLite, and Claude calls stay few)
+
+
+def _classify_ids(run_id: int, fp: m.FilterProfile, ids: list[int], stage_tick=None) -> tuple[dict, list[str]]:
+    def one(jid):
+        try:
+            llm.set_current_run(run_id)
+            with db.session_scope() as s:
+                job = s.get(m.Job, jid)
+            try:
+                c = classify_job(job)
+            except llm.BudgetExceeded as e:
+                return ("budget", str(e))
+            except Exception as e:
+                return ("error", f"classify {jid}: {e}")
+            with db.session_scope() as s:
+                job = s.get(m.Job, jid)
+                apply_classification(job, c, fp)
+                job.updated_at = datetime.now().astimezone()
+                s.add(job)
+                return ("ok", job.status)
+        finally:
+            if stage_tick:
+                stage_tick()
+
+    res = _parallel(one, ids)
+    counts = {"classified": sum(1 for r in res if r[0] == "ok"), "full_time_excluded": 0,
+              "needs_review": sum(1 for r in res if r == ("ok", m.JobStatus.NEEDS_REVIEW))}
+    with db.session_scope() as s:
+        for jid in ids:
+            j = s.get(m.Job, jid)
+            if j and j.exclude_reason in ("Full-time", "Senior role (full-time)"):
+                counts["full_time_excluded"] += 1
+    return counts, [r[1] for r in res if r[0] in ("error", "budget")][:20]
+
+
+def _score_ids(run_id: int, ids: list[int], stage_tick=None) -> tuple[dict, list[str]]:
+    with db.session_scope() as s:
+        ids = [j.id for j in s.exec(select(m.Job).where(m.Job.id.in_(ids or [-1]),
+                                                         m.Job.status.in_([m.JobStatus.NEW, m.JobStatus.NEEDS_REVIEW]))).all()]
+    if not ids:
+        return {"scored": 0}, []
+    main = get_main()
+    if not main:
+        return {"scored": 0}, ["No main CV - jobs were not scored"]
+    profile, vid = main
+
+    def one(jid):
+        try:
+            llm.set_current_run(run_id)
+            with db.session_scope() as s:
+                job = s.get(m.Job, jid)
+            try:
+                store_score(jid, score_job(job, profile), vid)
+                return "ok"
+            except llm.BudgetExceeded as e:
+                return f"budget: {e}"
+            except Exception as e:
+                return f"score {jid}: {e}"
+        finally:
+            if stage_tick:
+                stage_tick()
+
+    res = _parallel(one, ids)
+    return {"scored": sum(1 for r in res if r == "ok")}, [r for r in res if r != "ok"][:20]
+
+
+def _save_source(run_id: int, fp_id: int, key: str, label: str, raws: list[RawJob], outcomes: list[dict]) -> tuple[dict, list[str]]:
+    """A source has finished: put its jobs on your job board now (store, sort, score), not after the slowest one."""
+    with _SAVE_LOCK:
+        fp = _fp(fp_id)
+        progress.source(run_id, key, phase="saving", jobs=len(raws))
+        counts = ingest(raws, run_id, fp)
+        new_ids = counts.pop("new_ids")
+        with db.session_scope() as s:
+            for o in outcomes:
+                s.add(m.SearchStat(run_id=run_id, **o))
+        c1, e1 = _classify_ids(run_id, fp, new_ids)
+        c2, e2 = _score_ids(run_id, new_ids)
+        counts.update(c1)
+        counts.update(c2)
+        events.emit({"type": "site_saved", "site": key, "jobs": len(raws), "new": counts["new"],
+                     "message": f"{label}: saved to your job board - {counts['found']} found, {counts['new']} new, "
+                                f"{counts['scored']} scored"}, run_id=run_id)
+        return counts, e1 + e2
+
+
+async def _finish_source(run_id: int, fp_id: int, key: str, label: str, jobs: list[RawJob], outcomes: list[dict],
+                         errors: list[str]) -> dict:
+    """The node's result: saved right away; if saving fails, the jobs go to the usual step at the end instead."""
+    try:
+        counts, errs = await asyncio.to_thread(_save_source, run_id, fp_id, key, label, jobs, outcomes)
+        out = {"raw_jobs": [], "outcomes": [], "saved": [counts], "errors": errors + errs}
+    except Exception as e:  # never lose the jobs
+        log.exception("saving %s failed", key)
+        out = {"raw_jobs": [j.model_dump(mode="json") for j in jobs], "outcomes": outcomes,
+               "errors": errors + [f"{label}: saving right away failed ({e}) - saved at the end instead"]}
+    progress.source(run_id, key, done=True, jobs=len(jobs))
+    return out
 
 
 def clean_dedupe(state: SearchState) -> dict:
+    """Jobs not saved yet (a source whose saving failed, or a run started before this version) and the totals."""
     fp = _fp(state["filter_profile_id"])
     raws = [RawJob.model_validate(r) for r in state.get("raw_jobs", [])]
     progress.post(state["run_id"], "storing", 0, len(raws))
     counts = ingest(raws, state["run_id"], fp)
     new_ids = counts.pop("new_ids")
+    for c in state.get("saved", []):
+        for k in NUMERIC:
+            counts[k] = counts.get(k, 0) + (c.get(k) or 0)
     with db.session_scope() as s:
         for o in state.get("outcomes", []):
             s.add(m.SearchStat(run_id=state["run_id"], **o))
@@ -342,7 +473,6 @@ def clean_dedupe(state: SearchState) -> dict:
 
 def _ticker(run_id: int, stage: str, total: int):
     """Counts finished jobs for the progress bar (called from the worker threads)."""
-    import threading
     lock, n = threading.Lock(), [0]
 
     def tick():
@@ -357,91 +487,38 @@ def _parallel(fn, items):
         return list(ex.map(fn, items))
 
 
+def _add(counts: dict, more: dict) -> dict:
+    out = dict(counts)
+    for k, v in more.items():
+        out[k] = out.get(k, 0) + v
+    return out
+
+
 def classify(state: SearchState) -> dict:
     fp = _fp(state["filter_profile_id"])
     run_id = state["run_id"]
     ids = state.get("new_ids", [])
-
     progress.post(run_id, "sorting", 0, len(ids))
-    tick = _ticker(run_id, "sorting", len(ids))
-
-    def one(jid):
-        try:
-            return _classify_one(jid)
-        finally:
-            tick()
-
-    def _classify_one(jid):
-        llm.set_current_run(run_id)
-        with db.session_scope() as s:
-            job = s.get(m.Job, jid)
-        try:
-            c = classify_job(job)
-        except llm.BudgetExceeded as e:
-            return ("budget", str(e))
-        except Exception as e:
-            return ("error", f"classify {jid}: {e}")
-        with db.session_scope() as s:
-            job = s.get(m.Job, jid)
-            apply_classification(job, c, fp)
-            job.updated_at = datetime.now().astimezone()
-            s.add(job)
-            return ("ok", job.status)
-
-    res = _parallel(one, ids)
-    counts = dict(state.get("counts", {}))
-    counts["classified"] = sum(1 for r in res if r[0] == "ok")
-    counts["full_time_excluded"] = 0
-    with db.session_scope() as s:
-        for jid in ids:
-            j = s.get(m.Job, jid)
-            if j and j.exclude_reason in ("Full-time", "Senior role (full-time)"):
-                counts["full_time_excluded"] += 1
-    counts["needs_review"] = sum(1 for r in res if r == ("ok", m.JobStatus.NEEDS_REVIEW))
-    errors = [r[1] for r in res if r[0] in ("error", "budget")]
-    _emit(state, f"Classified {counts['classified']} jobs ({counts['full_time_excluded']} full-time excluded, "
-                 f"{counts['needs_review']} need review)", stage="classify")
-    return {"counts": counts, "errors": errors[:20]}
+    c, errors = _classify_ids(run_id, fp, ids, _ticker(run_id, "sorting", len(ids)))
+    counts = _add(state.get("counts", {}), c)
+    _emit(state, f"Classified {counts.get('classified', 0)} jobs ({counts.get('full_time_excluded', 0)} full-time "
+                 f"excluded, {counts.get('needs_review', 0)} need review)", stage="classify")
+    return {"counts": counts, "errors": errors}
 
 
 def score(state: SearchState) -> dict:
     run_id = state["run_id"]
-    main = get_main()
     counts = dict(state.get("counts", {}))
-    if not main:
+    if not get_main():
         _emit(state, "No main CV yet - upload it on the My CV screen, then press Re-score", stage="score", level="warn")
-        counts["scored"] = 0
+        counts["scored"] = counts.get("scored", 0)
         return {"counts": counts, "errors": ["No main CV - jobs were not scored"]}
-    profile, vid = main
-    with db.session_scope() as s:
-        ids = [j.id for j in s.exec(select(m.Job).where(m.Job.first_seen_run == run_id,
-                                                         m.Job.status.in_([m.JobStatus.NEW, m.JobStatus.NEEDS_REVIEW]))).all()]
-
+    ids = state.get("new_ids", [])
     progress.post(run_id, "scoring", 0, len(ids))
-    tick = _ticker(run_id, "scoring", len(ids))
-
-    def one(jid):
-        try:
-            return _score_one(jid)
-        finally:
-            tick()
-
-    def _score_one(jid):
-        llm.set_current_run(run_id)
-        with db.session_scope() as s:
-            job = s.get(m.Job, jid)
-        try:
-            store_score(jid, score_job(job, profile), vid)
-            return "ok"
-        except llm.BudgetExceeded as e:
-            return f"budget: {e}"
-        except Exception as e:
-            return f"score {jid}: {e}"
-
-    res = _parallel(one, ids)
-    counts["scored"] = sum(1 for r in res if r == "ok")
-    _emit(state, f"Scored {counts['scored']} jobs", stage="score")
-    return {"counts": counts, "errors": [r for r in res if r != "ok"][:20]}
+    c, errors = _score_ids(run_id, ids, _ticker(run_id, "scoring", len(ids)))
+    counts = _add(counts, c)
+    _emit(state, f"Scored {counts.get('scored', 0)} jobs", stage="score")
+    return {"counts": counts, "errors": errors}
 
 
 def export(state: SearchState) -> dict:
@@ -462,7 +539,7 @@ def export(state: SearchState) -> dict:
                 by_verdict[v] = by_verdict.get(v, 0) + 1
     counts.update({"by_role": by_role, "by_source": by_source, "by_verdict": by_verdict})
     cost = llm.cost_tracker.run_cost.get(run_id, 0.0)
-    _update_run(run_id, counts=counts, errors=state.get("errors", []), status="done",
+    _update_run(run_id, counts=counts, errors=list(dict.fromkeys(state.get("errors", []))), status="done",
                 finished_at=datetime.now().astimezone(), cost_usd=round(cost, 4))
     progress.finish(run_id, "done")
     _emit(state, f"Done. Saved {path.name}", stage="done", file=str(path))

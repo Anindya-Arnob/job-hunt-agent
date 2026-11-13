@@ -65,8 +65,18 @@ LOGIN_SITES = {"linkedin", "glassdoor", "xing", "wellfound", "indeed"}
 
 def init_db() -> None:
     SQLModel.metadata.create_all(get_engine())
+    _add_missing_columns()
     seed()
     load_setting_overrides()
+
+
+def _add_missing_columns() -> None:
+    """New fields on existing tables (create_all only makes new tables)."""
+    from sqlalchemy import text
+    with get_engine().begin() as con:
+        have = {r[1] for r in con.execute(text("PRAGMA table_info(filter_profile)"))}
+        if have and "plan" not in have:
+            con.execute(text("ALTER TABLE filter_profile ADD COLUMN plan JSON"))
 
 
 def seed() -> None:

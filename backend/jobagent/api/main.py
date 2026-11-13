@@ -301,6 +301,7 @@ class FilterIn(BaseModel):
     exclude_companies: list[str] = []
     min_salary: int = 0
     is_default: bool = False
+    plan: dict = {}
 
 
 @app.get("/api/filters/options")
@@ -315,7 +316,14 @@ def filter_options():
 @app.get("/api/filters")
 def list_filters():
     with db.session_scope() as s:
-        return [f.model_dump() for f in s.exec(select(m.FilterProfile)).all()]
+        return [{**f.model_dump(), "plan": f.plan or {}} for f in s.exec(select(m.FilterProfile)).all()]
+
+
+@app.post("/api/filters/plan")
+def plan_preview(f: FilterIn):
+    """The search plan for the profile on screen (saved or not): searches per site, place and job field."""
+    from ..steps import search_plan
+    return search_plan.preview(f.model_dump())
 
 
 @app.post("/api/filters")
@@ -539,7 +547,7 @@ def site_search_links(site: str, filter_profile_id: Optional[int] = None):
         fp = fp or s.exec(select(m.FilterProfile)).first()
         if not fp:
             return []
-        qs = planner.plan_site_queries(site, fp.roles, fp.job_types, fp.locations, fp.days, fp.work_modes, fp.keywords_in)
+        qs = planner.plan_for_profile(site, fp)
     spec = SITES[site]
     out = []
     for q in qs:

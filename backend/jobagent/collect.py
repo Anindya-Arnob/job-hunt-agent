@@ -94,13 +94,14 @@ def plan(sites: list[str], filter_profile_id: Optional[int] = None, pages: Optio
         if site not in SITES:
             continue
         spec = SPECS[site]
+        limit = planner.site_plan(fp.plan, site)["searches"] if fp.plan else MAX_PER_SITE   # your search plan
         qs = planner.plan_site_queries(site, fp.roles, fp.job_types, fp.locations, fp.days, fp.work_modes,
-                                       fp.keywords_in)
+                                       fp.keywords_in, max_queries=max(1, limit), plan=fp.plan)
         qs = spread(qs)
-        per_q = pages if len(qs) * pages <= MAX_PER_SITE else 1
+        per_q = pages if len(qs) * pages <= limit else 1
         added = 0
         for q in qs:
-            if added >= MAX_PER_SITE:
+            if added >= limit:
                 break
             label = f"{spec.label}: {q.keywords[:60]} – {q.location}"
             for p in range(per_q):

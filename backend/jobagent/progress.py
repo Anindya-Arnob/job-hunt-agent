@@ -107,6 +107,8 @@ def _eta_source(s: dict, now: float) -> Optional[float]:
         if s["reads_pages"]:
             left += min(cap, projected_new) * _page_seconds()
         return left
+    if s["phase"] == "saving":
+        return s["jobs"] * POST_SECONDS_PER_JOB
     if s["phase"] == "reading":
         done, total = s["pages_done"], s["pages_total"]
         if done and s["t_pages"]:
@@ -135,8 +137,10 @@ def _snapshot(run_id: int) -> Optional[dict]:
         if s["phase"] == "reading" and s["pages_total"]:
             frac = 0.5 + 0.5 * s["pages_done"] / s["pages_total"]
             what = f"reading job pages {s['pages_done']} of {s['pages_total']}"
+        elif s["phase"] == "saving":
+            frac, what = 0.97, f"saving {s['jobs']} jobs to your job board"
         elif s["phase"] == "done":
-            frac, what = 1.0, f"done · {s['jobs']} jobs"
+            frac, what = 1.0, f"done · {s['jobs']} jobs, on your job board"
         elif s["searches"]:
             frac = min(1.0, s["searched"] / s["searches"]) * (0.5 if s["reads_pages"] else 1.0)
             what = f"search {s['searched']} of {s['searches']}" + (f" · {s['new_seen']} new so far" if s["new_seen"] else "")

@@ -59,6 +59,7 @@ class Query(BaseModel):
     days: int = 5
     split_level: int = 0
     role: str = ""
+    place: str = ""                # the place from your profile this search covers (Europe, not "European Union")
     # sites with OR search (Indeed): one search covers several role terms / job-type words,
     # and is split into the single searches only when it hits the result limit
     any_terms: list[str] = Field(default_factory=list)

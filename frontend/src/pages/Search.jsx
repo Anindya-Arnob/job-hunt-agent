@@ -4,6 +4,7 @@ import { api, fmtTime, SOURCE_LABEL } from '../api'
 import { ChipSelect, StatusBadge, TagInput, useAsync, useToast } from '../ui'
 import { useEvents } from '../events'
 import RunProgress from '../components/RunProgress'
+import SearchPlan from '../components/SearchPlan'
 
 const BLANK = { name: 'New profile', roles: [], keywords_in: [], keywords_out: [], job_types: ['Internship', 'Working Student', 'Part-time'],
   locations: ['Berlin', 'Remote'], work_modes: ['Remote', 'Hybrid', 'On-site'], days: 5, sources: [], language_max: 'any',
@@ -108,7 +109,8 @@ export default function SearchPage() {
                 {['A1', 'A2', 'B1', 'B2', 'C1'].map((l) => <option key={l} value={l}>Up to {l}</option>)}
               </select></div>
             <div className="md:col-span-2"><span className="label">Sources</span><ChipSelect options={O.sources.map((s) => s.id)} value={form.sources} onChange={set('sources')} labels={srcLabels} />
-              {BROWSER_SITES.some((x) => form.sources.includes(x)) && <BrowserCollect sites={BROWSER_SITES.filter((x) => form.sources.includes(x))} modes={modes} filterId={form.id} />}</div>
+              {BROWSER_SITES.some((x) => form.sources.includes(x)) && <BrowserCollect sites={BROWSER_SITES.filter((x) => form.sources.includes(x))} modes={modes} filterId={form.id} />}
+              <SearchPlan form={form} onPlan={set('plan')} /></div>
             <div><span className="label">Exclude companies</span><TagInput value={form.exclude_companies} onChange={set('exclude_companies')} placeholder="Company name" /></div>
             <div className="flex items-end"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_default} onChange={(e) => set('is_default')(e.target.checked)} />Use for the morning run</label></div>
           </div>

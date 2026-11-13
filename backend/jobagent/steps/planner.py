@@ -79,21 +79,73 @@ def _terms(roles: list[str]) -> list[tuple[str, str]]:
     return out
 
 
-def plan_site_queries(site: str, roles: list[str], job_types: list[str], locations: list[str],
-                      days: int, work_modes: list[str] | None = None, keywords_in: list[str] | None = None,
-                      max_queries: int = 80) -> list[Query]:
+# ------------------------------------------------------------- search plan ---
+# How many searches each site gets per run, how many of them are narrower (city) searches, and a rough
+# number above which the site tends to refuse pages or block for a while. You change the first two on the
+# Search screen; the third is only used for the warning there.
+SITE_PLAN = {
+    "linkedin":  {"searches": 80,  "narrow": 15, "safe": 80,
+                  "risk": "LinkedIn starts answering 'too many requests' after about 80 searches in one run. Above "
+                          "that the run gets much slower (it waits after every refusal), and LinkedIn may block "
+                          "searches from this computer for a few hours."},
+    "stepstone": {"searches": 120, "narrow": 30, "safe": 150,
+                  "risk": "StepStone may show 'access denied' pages after about 150 searches in one run."},
+    "xing":      {"searches": 120, "narrow": 30, "safe": 150,
+                  "risk": "XING may refuse pages after about 150 searches in one run."},
+    "wellfound": {"searches": 60,  "narrow": 0,  "safe": 80,
+                  "risk": "Wellfound shows its human check more often after about 80 searches in one run."},
+    "glassdoor": {"searches": 20,  "narrow": 0,  "safe": 20,
+                  "risk": "Glassdoor is collected in your own Chrome: more than about 20 searches means more "
+                          "human checks for you, and Glassdoor may lock the search for a while."},
+    "indeed":    {"searches": 20,  "narrow": 0,  "safe": 20,
+                  "risk": "Indeed is collected in your own Chrome: more than about 20 searches means more "
+                          "human checks for you, and Indeed may block for a while."},
+}
+MAX_SEARCHES = 400            # per site and run, whatever you type
+WEIGHT_LABELS = {1: "Normal", 2: "More", 3: "Most"}
+CUSTOM_FIELD = "Your keywords"
+
+
+def site_plan(plan: dict | None, site: str) -> dict:
+    """{'searches', 'narrow', 'safe', 'risk'} for a site: your numbers on top of the defaults."""
+    d = dict(SITE_PLAN.get(site, {"searches": 80, "narrow": 0, "safe": 80, "risk": ""}))
+    mine = ((plan or {}).get("sites") or {}).get(site) or {}
+    try:
+        if "searches" in mine:
+            d["searches"] = max(0, min(MAX_SEARCHES, int(mine["searches"])))
+        if "narrow" in mine:
+            d["narrow"] = max(0, int(mine["narrow"]))
+    except (TypeError, ValueError):
+        pass
+    d["narrow"] = min(d["narrow"], d["searches"])
+    return d
+
+
+def weight(plan: dict | None, kind: str, name: str) -> int:
+    """kind 'places' or 'fields': 1 normal (equal share), 2 more, 3 most."""
+    try:
+        w = int(((plan or {}).get(kind) or {}).get(name, 1))
+    except (TypeError, ValueError):
+        w = 1
+    return max(1, min(3, w))
+
+
+def _interleave(lists: list[list]) -> list:
+    """First item of each list, then the second of each, ...: a few searches still cover every term."""
+    out = []
+    for i in range(max((len(x) for x in lists), default=0)):
+        out += [x[i] for x in lists if i < len(x)]
+    return out
+
+
+def site_cells(site: str, roles: list[str], job_types: list[str], locations: list[str], days: int,
+               work_modes: list[str] | None = None, keywords_in: list[str] | None = None) -> list[dict]:
+    """Every search the site could run, grouped by (place, job field), most useful first inside a group."""
     allowed = SITE_LOCATIONS.get(site)
     locs = [l for l in sorted(locations, key=lambda x: LOCATION_PRIORITY.index(x) if x in LOCATION_PRIORITY else 99)
             if allowed is None or l in allowed]
-    terms = _terms(roles) + [("Custom", k) for k in (keywords_in or [])]
-    queries: list[Query] = []
-    seen = set()
-
-    def add(q: Query):
-        if q.key not in seen:
-            seen.add(q.key)
-            queries.append(q)
-
+    terms = _terms(roles) + [(CUSTOM_FIELD, k) for k in (keywords_in or [])]
+    cells: list[dict] = []
     for loc in locs:
         wm = "Remote" if loc == "Remote" else ""
         site_loc = LINKEDIN_LOCATION.get(loc, loc) if site == "linkedin" else loc
@@ -106,27 +158,92 @@ def plan_site_queries(site: str, roles: list[str], job_types: list[str], locatio
                     ws = JT_DE.get(jt, []) + ws
                 words += [w for w in ws if w not in words]
             all_terms = [t for _, t in terms]
-            add(Query(site=site, keywords=or_keywords(all_terms, words), location=site_loc, work_mode=wm,
-                      days=days, role=terms[0][0] if len({r for r, _ in terms}) == 1 else "",
-                      any_terms=all_terms, type_words=words))
+            cells.append({"place": loc, "field": "", "queries": [Query(
+                site=site, keywords=or_keywords(all_terms, words), location=site_loc, work_mode=wm, days=days,
+                role=terms[0][0] if len({r for r, _ in terms}) == 1 else "", any_terms=all_terms, type_words=words,
+                place=loc)]})
             continue
+        by_field: dict[str, list[list[Query]]] = {}
         for role, term in terms:
+            per_term: list[Query] = []
             if site in JT_FILTER_SITES:
-                add(Query(site=site, keywords=term, location=site_loc, job_type=",".join(job_types),
-                          work_mode=wm, days=days, role=role))
+                per_term.append(Query(site=site, keywords=term, location=site_loc, job_type=",".join(job_types),
+                                      work_mode=wm, days=days, role=role, place=loc))
                 if german and "Working Student" in job_types:
                     # LinkedIn often tags Werkstudent jobs as full-time, so search the word too
-                    add(Query(site=site, keywords=f"Werkstudent {term}", location=site_loc, work_mode=wm,
-                              days=days, role=role))
-                continue
-            for jt in job_types:
-                words = list(JT_EN.get(jt, []))
-                if german:
-                    words = JT_DE.get(jt, []) + ([] if site in ("stepstone", "xing") else words)
-                for w in words:
-                    add(Query(site=site, keywords=f"{w} {term}", location=site_loc, work_mode=wm,
-                              days=days, role=role))
-    return queries[:max_queries]
+                    per_term.append(Query(site=site, keywords=f"Werkstudent {term}", location=site_loc,
+                                          work_mode=wm, days=days, role=role, place=loc))
+            else:
+                for jt in job_types:
+                    words = list(JT_EN.get(jt, []))
+                    if german:
+                        words = JT_DE.get(jt, []) + ([] if site in ("stepstone", "xing") else words)
+                    for w in words:
+                        per_term.append(Query(site=site, keywords=f"{w} {term}", location=site_loc, work_mode=wm,
+                                              days=days, role=role, place=loc))
+            by_field.setdefault(role, []).append(per_term)
+        for field, lists in by_field.items():
+            cells.append({"place": loc, "field": field, "queries": _interleave(lists)})
+    # the same search can come from two fields (shared terms): keep it once
+    seen: set = set()
+    for c in cells:
+        c["queries"] = [q for q in c["queries"] if not (q.key in seen or seen.add(q.key))]
+    return [c for c in cells if c["queries"]]
+
+
+def _share(weights: list[int], caps: list[int], budget: int) -> list[int]:
+    """Hand out searches one at a time to whoever is furthest behind their share (weight 2 = double share);
+    someone who has no searches left gives their share to the others."""
+    n = [0] * len(weights)
+    for _ in range(max(0, budget)):
+        best = None
+        for i in range(len(weights)):
+            if n[i] < caps[i] and (best is None or (n[i] + 1) / weights[i] < (n[best] + 1) / weights[best]):
+                best = i
+        if best is None:
+            break
+        n[best] += 1
+    return n
+
+
+def allocate(cells: list[dict], budget: int, plan: dict | None = None) -> list[int]:
+    """How many searches each (place, job field) group gets: first the places share the site's searches
+    (equal by default; More = double, Most = triple), then inside each place the job fields share them."""
+    places = list(dict.fromkeys(c["place"] for c in cells))
+    idx = {p: [i for i, c in enumerate(cells) if c["place"] == p] for p in places}
+    per_place = _share([weight(plan, "places", p) for p in places],
+                       [sum(len(cells[i]["queries"]) for i in idx[p]) for p in places], budget)
+    n = [0] * len(cells)
+    total: dict[str, int] = {}                 # searches per job field over all places so far: ties go to the
+    for p, k in zip(places, per_place):        # field with the fewest, so small numbers still rotate fairly
+        ids = idx[p]
+        w = {i: weight(plan, "fields", cells[i]["field"]) if cells[i]["field"] else 1 for i in ids}
+        for _ in range(k):
+            free = [i for i in ids if n[i] < len(cells[i]["queries"])]
+            if not free:
+                break
+            i = min(free, key=lambda i: ((n[i] + 1) / w[i], (total.get(cells[i]["field"], 0) + 1) / w[i]))
+            n[i] += 1
+            total[cells[i]["field"]] = total.get(cells[i]["field"], 0) + 1
+    return n
+
+
+def plan_site_queries(site: str, roles: list[str], job_types: list[str], locations: list[str],
+                      days: int, work_modes: list[str] | None = None, keywords_in: list[str] | None = None,
+                      max_queries: int = 80, plan: dict | None = None) -> list[Query]:
+    """The searches for one site: max_queries of them, shared fairly between places and job fields."""
+    cells = site_cells(site, roles, job_types, locations, days, work_modes, keywords_in)
+    n = allocate(cells, max_queries, plan)
+    # round-robin over the groups, so a run that stops early has still searched every place and field
+    return _interleave([c["queries"][:k] for c, k in zip(cells, n)])
+
+
+def plan_for_profile(site: str, fp, plan: dict | None = None) -> list[Query]:
+    """The first-round searches for a site from a search profile (its plan decides the numbers)."""
+    plan = getattr(fp, "plan", None) if plan is None else plan
+    sp = site_plan(plan, site)
+    return plan_site_queries(site, fp.roles, fp.job_types, fp.locations, fp.days, fp.work_modes, fp.keywords_in,
+                             max_queries=sp["searches"] - sp["narrow"], plan=plan)
 
 
 def split_query(q: Query) -> list[Query]:
