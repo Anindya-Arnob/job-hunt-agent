@@ -102,6 +102,52 @@ def set_current_run(run_id: Optional[int]) -> None:
     _current_run.id = run_id
 
 
+# Claude Code processes running for each run: Stop ends them at once, so a stopped build uses no more tokens
+_procs: dict = {}
+_procs_lock = threading.Lock()
+_stopped: set = set()
+
+
+def kill_run(run_id: int) -> int:
+    """End every Claude call still running for this run (Stop button). Returns how many were ended."""
+    import os
+    import subprocess
+    with _procs_lock:
+        procs = list(_procs.get(run_id, ()))
+        _stopped.add(run_id)
+    for p in procs:
+        try:
+            if os.name == "nt":      # the whole process tree (claude may run under a wrapper)
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=10)
+            else:
+                p.kill()
+        except Exception:
+            pass
+    return len(procs)
+
+
+def _run_claude(cmd: list, prompt: str, cwd: str, timeout: int = 420):
+    """subprocess.run, but registered under the current run so Stop can end it."""
+    import subprocess
+    rid = current_run()
+    if rid in _stopped:
+        raise LLMUnavailable("Stopped by you")
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+    with _procs_lock:
+        _procs.setdefault(rid, set()).add(p)
+    try:
+        out, err = p.communicate(prompt.encode("utf-8"), timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        out, err = p.communicate()
+    finally:
+        with _procs_lock:
+            _procs.get(rid, set()).discard(p)
+    if rid in _stopped:
+        raise LLMUnavailable("Stopped by you")
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
 def current_run() -> Optional[int]:
     return getattr(_current_run, "id", None)
 
@@ -172,7 +218,7 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
                                       model=cc.cli_model(chosen_model(node)), effort=effort)
             prompt = (f"{user}\n\n{tail}" if sys_set else f"{system}\n\n{user}\n\n{tail}") + fix
             cmd = cc.prefix(exe) + ["-p", "--output-format", "json", "--max-turns", "1"] + extra
-            out = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, cwd=cwd, timeout=420)
+            out = _run_claude(cmd, prompt, cwd, timeout=420)
         try:
             env = json.loads(out.stdout.decode("utf-8", "replace"))
         except ValueError:

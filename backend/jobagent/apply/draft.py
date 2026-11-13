@@ -5,6 +5,8 @@ short, in the language of the question. You read every draft (amber) before you 
 """
 from __future__ import annotations
 
+from ..textutil import strip_gender
+
 import json
 import logging
 import subprocess
@@ -67,7 +69,7 @@ def make_drafter(ctx) -> Optional[Callable[[str], str]]:
         except Exception as e:
             log.info("draft failed: %s", e)
             return ""
-        return text.strip().strip('"')[:3000]
+        return strip_gender(text.strip().strip('"'))[:3000]
 
     return draft
 
@@ -109,7 +111,7 @@ def _parse_answers(text: str) -> dict:
     except ValueError:
         return {}
     ans = data.get("answers", data) if isinstance(data, dict) else {}
-    return {str(k): (str(v).strip() if v not in (None, "", "null") else None) for k, v in ans.items()}
+    return {str(k): (strip_gender(str(v)) if v not in (None, "", "null") else None) for k, v in ans.items()}
 
 
 def make_batch_answerer(ctx) -> Optional[Callable[[list[dict]], dict]]:

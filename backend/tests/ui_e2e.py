@@ -187,6 +187,10 @@ with sync_playwright() as p:
     page.locator("aside").get_by_role("link", name=re.compile(r"^Apply(\s|$)")).click()
     expect(page.get_by_text("Your jobs with a finished CV")).to_be_visible()
     expect(page.get_by_role("button", name="Apply in my browser")).to_be_visible()
+    # nothing is ticked for you: Rebuild / Apply only work on the jobs you tick
+    expect(page.get_by_role("button", name="Use the app's Chrome window (0)")).to_be_disabled()
+    expect(page.get_by_role("button", name="Rebuild ticked (0)")).to_be_disabled()
+    page.locator("label").filter(has=page.get_by_role("button", name="Apply in my browser")).first.locator("input[type=checkbox]").check()
     expect(page.get_by_role("button", name="Use the app's Chrome window (1)")).to_be_enabled()
     expect(page.get_by_role("button", name="Rebuild", exact=True)).to_be_visible()
     # pressed by mistake? the first click only asks

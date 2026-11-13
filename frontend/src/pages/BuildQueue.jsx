@@ -59,7 +59,7 @@ export default function BuildQueue() {
           <div className="card-h">Being built right now ({builds.list.length})<span className="text-xs font-normal muted">also when you started it on another screen</span></div>
           <div className="divide-y divide-slate-100">
             {builds.list.map((b) => (
-              <div key={b.job_id} className="px-4 py-2.5 text-sm"><div className="font-semibold">{b.company} – {b.title}</div><BuildingNote b={b} /></div>
+              <div key={b.job_id} className="px-4 py-2.5 text-sm"><div className="font-semibold">{b.company} – {b.title}</div><BuildingNote b={b} onStopped={() => { builds.reload(); runs.reload() }} /></div>
             ))}
           </div>
         </div>)}

@@ -43,6 +43,7 @@ def active_builds() -> list[dict]:
             job = ss.get(m.Job, jid)
             company, title = (job.company, job.title) if job else ("", "")
         out.append({"job_id": jid, "run_id": b["run_id"], "started": b["started"], "company": company, "title": title,
+                    "in_run": sum(1 for x in BUILDING.values() if x["run_id"] == b["run_id"]),
                     "state": "building" if current == jid else ("waiting" if not mine else "building"),
                     "last": (mine[-1].get("message") if mine else "waiting for its turn")[:200],
                     "attempt": sum(1 for e in mine if str(e.get("message", "")).startswith("CV attempt"))})
@@ -151,6 +152,9 @@ async def cancel(run_id: int) -> bool:
     t = _tasks.get(run_id)
     if t and not t.done():
         t.cancel()
+    llm.kill_run(run_id)                       # a Claude call already running stops too (no more tokens)
+    for jid in [j for j, b in BUILDING.items() if b["run_id"] == run_id]:
+        BUILDING.pop(jid, None)
     with db.session_scope() as s:
         r = s.get(m.Run, run_id)
         if r and r.status in ("running", "paused"):

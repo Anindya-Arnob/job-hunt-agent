@@ -7,6 +7,8 @@ the extension reports it and the job is marked Applied.
 """
 from __future__ import annotations
 
+from ..textutil import strip_gender
+
 import base64
 import mimetypes
 import threading
@@ -129,7 +131,7 @@ def context_for(jid: int) -> tuple[m.Job, Context]:
     if jid not in _ctx_cache:
         docs = docs_for(jid)
         ctx = Context(profile=P.load(), job_type=job.job_type, cv_pdf=docs.get("cv", ""), letter_pdf=docs.get("letter", ""),
-                      cv_text=cv_text(), company=job.company, title=job.title, job_text=job.full_description or "",
+                      cv_text=cv_text(), company=job.company, title=strip_gender(job.title), job_text=job.full_description or "",
                       letter_text=letter_text(jid))
         ctx.answerer = make_batch_answerer(ctx)          # all open questions of a page in one Claude call
         ctx.drafter = None if ctx.answerer else make_drafter(ctx)

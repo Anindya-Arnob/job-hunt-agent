@@ -102,8 +102,8 @@ def test_cv_writer_uses_the_model_you_chose_through_claude_code(monkeypatch):
     def run(cmd, input=None, **kw):
         seen["cmd"], seen["stdin"] = cmd, input.decode()
         return Out()
-    import subprocess
-    monkeypatch.setattr(subprocess, "run", run)
+    # Claude Code is started through llm._run_claude (so the Stop button can end it)
+    monkeypatch.setattr(llm, "_run_claude", lambda cmd, prompt, cwd, timeout=420: run(cmd, input=prompt.encode()))
     monkeypatch.setattr(claude_code, "exe", lambda: "/usr/bin/claude")
     monkeypatch.setattr(claude_code, "help_text", lambda e=None: HELP)
     monkeypatch.setattr(claude_code, "installed_plugins", lambda: {})

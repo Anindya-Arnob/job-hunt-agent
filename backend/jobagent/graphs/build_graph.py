@@ -122,7 +122,8 @@ def built_files(job_id: int) -> list[str]:
 
 def clean_title(title: str) -> str:
     """'Werkstudent Data (m/w/d) - Berlin' -> 'Werkstudent Data - Berlin' (no gender tags in letters)."""
-    t = re.sub(r"\(\s*(m|w|d|f|x|div|all genders?|alle geschlechter|gn\*?)(\s*[/|,]\s*(m|w|d|f|x|div|i))*\s*\)", "", title or "", flags=re.I)
+    from ..textutil import strip_gender
+    t = strip_gender(title or "")
     t = re.sub(r"\b(m/w/d|w/m/d|m/f/d|f/m/d|m/w/x|all genders)\b", "", t, flags=re.I)
     return re.sub(r"\s{2,}", " ", re.sub(r"\s+([,–-])\s*$", "", t)).strip(" -–,")
 

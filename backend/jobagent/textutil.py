@@ -47,6 +47,20 @@ def norm_company(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", s).strip()
 
 
+_G = r"(?:m|w|d|f|x|i|h|div\.?|divers|diverse|nb|all genders?|alle geschlechter|gn\*?|\*)"
+GENDER_TAG = re.compile(r"\s*[(\[]\s*" + _G + r"(?:\s*[/|,*]\s*" + _G + r")*\s*[)\]]\**", re.I)
+GENDER_BARE = re.compile(r"\s*\b(?:m|w|d|f|h)\s*/\s*(?:m|w|d|f|h)(?:\s*/\s*(?:m|w|d|f|x|div\.?|i))?\b\.?", re.I)
+
+
+def strip_gender(text: str) -> str:
+    """'Praktikant (m/w/d) im Bereich KI' -> 'Praktikant im Bereich KI'. Every bracketed or bare form job ads
+    use: (m/w/d), (M/F/D), (w/m/div.), (gn*), (all genders), [m/w/d], m/w/d, (H/F)."""
+    t = GENDER_TAG.sub("", text or "")
+    t = GENDER_BARE.sub("", t)
+    t = re.sub(r"\s+([,.;:!?)])", r"\1", t)
+    return re.sub(r"[ \t]{2,}", " ", t).strip()
+
+
 def norm_title(title: str) -> str:
     s = strip_accents(title or "").lower()
     s = re.sub(r"\((m|w|d|f|x|div|all genders?|gn)[/|,\s]*(m|w|d|f|x)?[/|,\s]*(m|w|d|f|x)?\)", " ", s)

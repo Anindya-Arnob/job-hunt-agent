@@ -79,3 +79,53 @@ def test_the_same_job_is_not_built_twice_at_once(setup, monkeypatch):  # noqa: F
                 break
             time.sleep(0.1)
         assert c.get("/api/build/active").json() == []
+
+
+def test_stop_ends_the_running_claude_call_at_once():
+    import threading
+    import time
+    from jobagent import llm
+    res = {}
+
+    def work():
+        llm.set_current_run(9901)
+        try:
+            llm._run_claude(["sleep", "30"], "prompt", "/tmp", timeout=60)
+        except llm.LLMUnavailable as e:
+            res["err"] = str(e)
+    t = threading.Thread(target=work)
+    t0 = time.time()
+    t.start()
+    time.sleep(0.5)
+    assert llm.kill_run(9901) == 1
+    t.join(10)
+    assert res.get("err") == "Stopped by you" and time.time() - t0 < 5
+
+
+def test_stop_button_clears_the_build(setup, monkeypatch):  # noqa: F811
+    from fastapi.testclient import TestClient
+    from jobagent.api import runs
+    from jobagent.api.main import app
+
+    async def slow_build(job_ids, cv_profile_id, rebuild, run_id):
+        await asyncio.sleep(30)
+    monkeypatch.setattr(runs.build_graph, "start_build", slow_build)
+    with TestClient(app) as c:
+        r = c.post("/api/build", json={"job_ids": [setup["good"]], "rebuild": True}).json()
+        assert c.get("/api/build/active").json()[0]["in_run"] == 1
+        c.post(f"/api/runs/{r['run_id']}/cancel")
+        assert c.get("/api/build/active").json() == []
+        assert c.get(f"/api/runs/{r['run_id']}").json()["run"]["status"] == "cancelled"
+
+
+def test_no_gender_tags_in_letters_or_form_answers():
+    from jobagent.apply.draft import _parse_answers
+    from jobagent.textutil import strip_gender
+    for raw, clean in [("Praktikant (m/w/d) im Bereich KI", "Praktikant im Bereich KI"),
+                       ("JUNIOR GRAPH AI ENGINEER (M/F/D)", "JUNIOR GRAPH AI ENGINEER"),
+                       ("Werkstudent (w/m/div.) Data", "Werkstudent Data"), ("Job (gn*)", "Job"),
+                       ("Job m/w/d in Berlin", "Job in Berlin"), ("Stage Data (H/F)", "Stage Data"),
+                       ("Python/SQL and B2B/B2C", "Python/SQL and B2B/B2C")]:
+        assert strip_gender(raw) == clean, raw
+    ans = _parse_answers('{"answers": {"q1": "I am applying for the Praktikant (m/w/d) role at Marquardt.", "q2": null}}')
+    assert ans == {"q1": "I am applying for the Praktikant role at Marquardt.", "q2": None}

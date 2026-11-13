@@ -7,6 +7,8 @@ received, the job is marked "Applied", your new answers are saved for next time,
 """
 from __future__ import annotations
 
+from ..textutil import strip_gender
+
 import asyncio
 import logging
 from datetime import date, datetime
@@ -205,7 +207,7 @@ class ApplySession:
     def _context_for(self, job: m.Job, docs: dict) -> Context:
         prof = P.load()
         ctx = Context(profile=prof, job_type=job.job_type, cv_pdf=docs.get("cv", ""), letter_pdf=docs.get("letter", ""),
-                      cv_text=cv_text(), company=job.company, title=job.title, job_text=job.full_description or "")
+                      cv_text=cv_text(), company=job.company, title=strip_gender(job.title), job_text=job.full_description or "")
         from .bridge import letter_text
         ctx.letter_text = letter_text(job.id)
         ctx.answerer = make_batch_answerer(ctx)

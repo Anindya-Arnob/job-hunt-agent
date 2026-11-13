@@ -109,7 +109,8 @@ export default function Apply() {
   const toast = useToast()
   const refresh = async () => setSt(await api.get('/api/apply/state'))
   useEffect(() => { refresh() }, [])
-  useEffect(() => { if (q.data && sel === null) setSel(new Set(q.data.jobs.filter((j) => !j.applied).slice(0, q.data.limit).map((j) => j.id))) }, [q.data]) // eslint-disable-line
+  // nothing is ticked for you: "Rebuild" and "Apply" only ever work on jobs you ticked yourself
+  useEffect(() => { if (q.data && sel === null) setSel(new Set()) }, [q.data]) // eslint-disable-line
   useOnEvent((ev) => {
     if (ev.type === 'apply') { refresh(); act.reload(); ext.reload(); if (ev.result || ['done', 'stopped'].includes(ev.state)) { q.reload(); hist.reload() } }
     if (['run_done', 'run_failed', 'run_cancelled'].includes(ev.type) && ev.run_id) q.reload()
@@ -187,7 +188,7 @@ export default function Apply() {
             <div className="text-xs muted">Best score first. Apply to up to {q.data?.limit ?? 20} a day (change in Settings). Wrongly marked as applied? Open <b>Applied</b> and press <b>Not applied</b>.</div></div>
           <button className="btn-ghost text-xs" onClick={() => setSel(new Set([...(sel || []), ...jobs.map((j) => j.id)]))}>Tick all</button>
           <button className="btn-ghost text-xs" onClick={() => setSel(new Set())}>Untick all</button>
-          <SureButton className="btn-outline" ask={`Rebuild ${chosen.length}? Click again`} onClick={() => chosen.length && rebuild(chosen.map((j) => j.id))} title="Write a new CV and cover letter for the ticked jobs (the old files are kept in _old_versions)"><RefreshCw size={14} />Rebuild CV + letter ({chosen.length})</SureButton>
+          <SureButton className="btn-outline disabled:opacity-50" disabled={!chosen.length} ask={`Rebuild ${chosen.length} ticked job(s)? Click again`} onClick={() => chosen.length && rebuild(chosen.map((j) => j.id))} title="Write a new CV and cover letter for the jobs you ticked, one after another (the old files are kept in _old_versions)"><RefreshCw size={14} />Rebuild ticked ({chosen.length})</SureButton>
           <button className="btn-outline" disabled={!chosenTodo.length || st?.running} onClick={start} title="The app opens its own Chrome window and goes through the ticked jobs"><MonitorPlay size={14} />Use the app's Chrome window ({chosenTodo.length})</button>
         </div>
         <div className="px-5"><Tabs value={tab} onChange={setTab} tabs={[{ id: 'todo', label: 'To apply', count: counts.todo }, { id: 'applied', label: 'Applied', count: counts.applied }, { id: 'all', label: 'All', count: counts.all }]} /></div>
@@ -204,7 +205,7 @@ export default function Apply() {
                   <div className="truncate text-xs text-slate-500">{j.company}{j.location ? ` · ${j.location}` : ''}
                     {j.applied && <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">applied {fmtDate(j.applied_at)}</span>}
                     {!j.applied && att && <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200" title={`Last try: ${fmtDateTime(j.last_attempt.at)}`}>last try: {att}</span>}</div>
-                  <BuildingNote b={builds.byJob[j.id]} /></div>
+                  <BuildingNote b={builds.byJob[j.id]} onStopped={builds.reload} /></div>
                 <span className="truncate text-xs text-slate-500">{j.job_type || '–'}</span>
                 <span className="flex gap-2 text-xs">
                   {busy ? <span className="inline-flex items-center gap-1 text-slate-400"><Loader2 size={12} className="animate-spin" />writing…</span> : <>

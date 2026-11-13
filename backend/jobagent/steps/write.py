@@ -6,6 +6,8 @@ Offline mode: a careful selector that only reuses text from your main CV
 """
 from __future__ import annotations
 
+from ..textutil import strip_gender
+
 import re
 from typing import Optional
 
@@ -286,7 +288,7 @@ def tidy_letter(L: LetterContent, job: JobForWriting) -> LetterContent:
     """Final clean-up for every letter: no em dashes, no gender tags, no empty company gaps."""
     def fix(t: str) -> str:
         t = re.sub(r"\s*—\s*", ", ", t or "")
-        t = _GENDER_TAG.sub("", t)
+        t = strip_gender(t)
         if not (job.company or "").strip():
             t = re.sub(r"\b(at|bei)\s+([.,;])", r"in your team\2", t)
         return re.sub(r"\s{2,}", " ", re.sub(r",\s*,", ",", t)).strip()
