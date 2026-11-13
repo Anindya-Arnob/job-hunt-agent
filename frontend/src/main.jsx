@@ -88,7 +88,7 @@ function Sidebar() {
         </div>
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold leading-tight text-navy">Job Hunt Agent</div>
-          <div className="truncate text-[11px] text-slate-500">AI · ML · Data roles</div>
+          <div className="truncate text-[11px] text-slate-500">Your job search, anywhere</div>
         </div>
       </div>
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">

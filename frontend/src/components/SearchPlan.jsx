@@ -124,7 +124,7 @@ export default function SearchPlan({ form, onPlan }) {
               <span className="label mb-0">Searches per site, each run</span>
               <button type="button" className="flex items-center gap-1 text-xs muted hover:underline" onClick={resetSites}><RotateCcw size={11} />Back to the usual numbers</button>
             </div>
-            <p className="mb-2 text-xs muted">A search reads up to 10 result pages. When a search has more jobs than that, a <b>narrower search</b> repeats it in one city at a time (Germany → Berlin, Munich, Hamburg …), the ones with the most unread jobs first, until the number you set is used up.</p>
+            <p className="mb-2 text-xs muted">A search reads up to 10 result pages. When a search has more jobs than that, a <b>narrower search</b> repeats it in smaller places: a country in its cities one at a time (e.g. Canada → Toronto, Vancouver, Montreal …), a region in its countries. The searches with the most unread jobs go first, until the number you set is used up.</p>
             <div className="space-y-2">
               {pv.sites.map((s) => (
                 <div key={s.site} className="rounded-md bg-slate-50 p-2">

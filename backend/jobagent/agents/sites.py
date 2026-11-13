@@ -67,7 +67,7 @@ class SiteSpec:
 
 
 # ----------------------------------------------------------------- LinkedIn ---
-LI_JT = {"Internship": "I", "Part-time": "P", "Working Student": "P"}
+LI_JT = {"Internship": "I", "Part-time": "P", "Working Student": "P", "Full-time": "F"}
 LI_WT = {"On-site": "1", "Remote": "2", "Hybrid": "3"}
 
 
@@ -126,20 +126,12 @@ def li_detail_extra(snap: Snapshot) -> dict:
 
 
 # ------------------------------------------------------------------- Indeed ---
-INDEED_DOMAINS = {
-    "Germany": "de.indeed.com", "Berlin": "de.indeed.com", "United Kingdom": "uk.indeed.com",
-    "United States": "www.indeed.com", "Canada": "ca.indeed.com", "Australia": "au.indeed.com",
-    "New Zealand": "nz.indeed.com", "Remote": "www.indeed.com", "Europe": "de.indeed.com",
-}
-
-
 def indeed_base(spec: SiteSpec, location: str) -> str:
+    """Indeed's site for the country of the place (ca.indeed.com for Toronto, ...)."""
     if spec.base != "https://www.indeed.com":   # overridden (tests)
         return spec.base
-    for key, dom in INDEED_DOMAINS.items():
-        if key.lower() in location.lower():
-            return f"https://{dom}"
-    return "https://www.indeed.com"
+    from .. import places
+    return f"https://{places.indeed_host(location)}"
 
 
 def indeed_search(spec: SiteSpec, q: Query, page: int, mode: str) -> str:
@@ -177,11 +169,8 @@ def indeed_parse(spec: SiteSpec, snap: Snapshot, q: Query):
 def gd_base(spec: SiteSpec, location: str) -> str:
     if spec.base != "https://www.glassdoor.com":
         return spec.base
-    if any(k in location for k in ("Germany", "Berlin", "Europe")):
-        return "https://www.glassdoor.de"
-    if "United Kingdom" in location:
-        return "https://www.glassdoor.co.uk"
-    return "https://www.glassdoor.com"
+    from .. import places
+    return f"https://{places.glassdoor_host(location)}"
 
 
 def gd_search(spec: SiteSpec, q: Query, page: int, mode: str) -> str:

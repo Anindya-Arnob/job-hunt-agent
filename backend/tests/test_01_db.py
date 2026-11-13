@@ -9,9 +9,10 @@ from jobagent.config import settings
 def test_tables_and_seed():
     with db.session_scope() as s:
         profiles = s.exec(select(m.FilterProfile)).all()
-        assert len(profiles) == 2
+        assert len(profiles) == 1
         default = [p for p in profiles if p.is_default][0]
-        assert "Working Student" in default.job_types and default.days == 5
+        # a new install starts empty: no job titles or places chosen for you
+        assert default.roles == [] and default.locations == [] and default.job_types == ["Full-time"]
         conns = {c.site: c.status for c in s.exec(select(m.Connection)).all()}
         assert conns["linkedin"] == "not_connected" and conns["indeed"] == "not_connected" and conns["stepstone"] == "not_needed"
 

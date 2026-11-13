@@ -42,7 +42,7 @@ def rough_minutes(site: str, searches: int, pages: dict | None = None) -> int:
 def preview(form: dict) -> dict:
     plan = form.get("plan") or {}
     roles, places = form.get("roles") or [], form.get("locations") or []
-    fields = list(roles) + ([P.CUSTOM_FIELD] if form.get("keywords_in") else [])
+    fields = list(dict.fromkeys(roles))
     pages = _pages_per_search()
     sites = []
     for site in [x for x in BROWSER_SITES if x in (form.get("sources") or [])]:
@@ -53,8 +53,7 @@ def preview(form: dict) -> dict:
         n = P.allocate(cells, base, plan)
         possible = sum(len(c["queries"]) for c in cells)
         used = sum(n)
-        allowed = P.SITE_LOCATIONS.get(site)
-        by_place = {p: 0 for p in places if allowed is None or p in allowed}
+        by_place = {p: 0 for p in places if P.covers(site, p)}
         by_field = {f: 0 for f in fields}
         for c, k in zip(cells, n):
             by_place[c["place"]] = by_place.get(c["place"], 0) + k
@@ -73,10 +72,18 @@ def preview(form: dict) -> dict:
         if missed_fields and possible:
             warnings.append({"level": "gap", "text": f"{', '.join(missed_fields)} {'gets' if len(missed_fields) == 1 else 'get'} "
                              f"no searches on {_label(site)}."})
+        cap_place: dict[str, int] = {}
+        for c in cells:
+            cap_place[c["place"]] = cap_place.get(c["place"], 0) + len(c["queries"])
+        full = [p for p in places if P.weight(plan, "places", p) > 1 and p in by_place and by_place[p] >= cap_place.get(p, 0) > 0]
+        if full:
+            warnings.append({"level": "info", "text": f"{', '.join(full)} already {'gets' if len(full) == 1 else 'get'} every "
+                             f"different search there is on {_label(site)} ({', '.join(str(cap_place[p]) for p in full)}), so More / "
+                             "Most adds nothing here. Add more job titles to search it more."})
         if base > possible:
             warnings.append({"level": "info", "text": f"Your choices make only {possible} different searches on "
                              f"{_label(site)}, so {base - possible} of the {base} are not needed."})
-        not_here = [p for p in places if allowed is not None and p not in allowed]
+        not_here = [p for p in places if not P.covers(site, p)]
         sites.append({
             "site": site, "label": _label(site), "searches": sp["searches"], "narrow": sp["narrow"], "base": base,
             "used": used, "possible": possible, "safe": sp["safe"], "risky": sp["searches"] > sp["safe"],

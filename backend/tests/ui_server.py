@@ -76,5 +76,14 @@ async def _nofetch(jobs, client=None, limit=80):
     return 0
 _MS.RESOLVE = _same
 _W.fetch_descriptions = _nofetch
+# the demo person: a student looking for AI / data jobs in Berlin (a new install starts with an empty profile)
+from sqlmodel import select as _sel  # noqa: E402
+from jobagent import db as _db, models as _m  # noqa: E402
+_db.init_db()
+with _db.session_scope() as _s:
+    _fp = _s.exec(_sel(_m.FilterProfile).where(_m.FilterProfile.is_default == True)).first()  # noqa: E712
+    _fp.name, _fp.roles = "AI and data jobs in Berlin", list(_db.ALL_ROLES)
+    _fp.locations, _fp.job_types, _fp.days = ["Berlin", "Germany", "Remote"], list(_db.STUDENT_JOB_TYPES), 5
+    _s.add(_fp)
 print("UI tmp:", tmp, flush=True)
 uvicorn.run("jobagent.api.main:app", host="127.0.0.1", port=int(sys.argv[1] if len(sys.argv) > 1 else 8780), log_level="warning")

@@ -73,7 +73,8 @@ class Query(BaseModel):
 # ------------------------------------------------------------ classify ---
 class Classification(BaseModel):
     job_type: JobType = Field(description="Internship, Working Student (Werkstudent), Part-time, Full-time, or Unclear if the posting does not say")
-    role_category: RoleCategory
+    role_category: str = Field(description="The one of the candidate's job titles this job is (copied exactly from the "
+                                           "list given), or Other if it is none of them")
     work_mode: WorkMode = "Unknown"
     language_requirements: str = Field("", description="e.g. 'English C1, German B2 (must)'; empty if none stated")
     german_required_level: Optional[Literal["A1", "A2", "B1", "B2", "C1", "C2"]] = Field(

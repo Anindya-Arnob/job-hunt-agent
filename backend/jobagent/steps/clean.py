@@ -14,55 +14,10 @@ from sqlmodel import or_, select
 
 from .. import db, models as m
 from ..schemas import RawJob
+from .. import roles as R
 from ..textutil import SENIOR_TITLE, STUDENT_TITLE, dedupe_key, guess_company, normalize_url, strip_accents
 
-# ----------------------------------------------------------------- regions ---
-GERMAN_CITIES = (
-    "berlin", "munich", "munchen", "hamburg", "frankfurt", "cologne", "koln", "stuttgart", "dusseldorf",
-    "leipzig", "dresden", "karlsruhe", "hannover", "nuremberg", "nurnberg", "bonn", "essen", "dortmund",
-    "mannheim", "heidelberg", "potsdam", "aachen", "bremen", "freiburg", "darmstadt", "wiesbaden", "mainz",
-    "jena", "ulm", "augsburg", "regensburg", "kiel", "lubeck", "munster", "erlangen", "walldorf", "ingolstadt",
-    "wolfsburg", "braunschweig", "gottingen", "kassel", "bochum", "duisburg", "bielefeld", "saarbrucken",
-    "paderborn", "rostock", "magdeburg", "halle", "chemnitz", "konstanz", "tubingen", "wurzburg", "garching",
-)
-GERMANY = ("germany", "deutschland", ", de", " de)") + GERMAN_CITIES
-EUROPE = (
-    "germany", "deutschland", "netherlands", "nederland", "amsterdam", "rotterdam", "eindhoven", "france", "paris",
-    "lyon", "bordeaux", "toulouse", "spain", "madrid", "barcelona", "austria", "osterreich", "vienna", "wien",
-    "switzerland", "schweiz", "zurich", "geneva", "basel", "lausanne", "ireland", "dublin", "poland", "warsaw",
-    "krakow", "wroclaw", "sweden", "stockholm", "gothenburg", "denmark", "copenhagen", "belgium", "brussels",
-    "antwerp", "italy", "milan", "rome", "turin", "portugal", "lisbon", "porto", "czech", "prague", "brno",
-    "finland", "helsinki", "norway", "oslo", "luxembourg", "esch-sur-alzette", "hungary", "budapest", "romania",
-    "bucharest", "greece", "athens", "estonia", "tallinn", "latvia", "riga", "lithuania", "vilnius", "croatia",
-    "slovenia", "slovakia", "bulgaria", "european union", "europe", "emea", "united kingdom", "london",
-) + GERMAN_CITIES
-UK = ("united kingdom", "england", "scotland", "wales", "london", "manchester", "cambridge", "oxford",
-      "edinburgh", "bristol", "birmingham", "glasgow", "leeds", ", uk", " uk")
-US_STATES = ("alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut", "delaware", "florida",
-             "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine",
-             "maryland", "massachusetts", "michigan", "minnesota", "mississippi", "missouri", "montana", "nebraska",
-             "nevada", "new hampshire", "new jersey", "new mexico", "new york", "north carolina", "north dakota",
-             "ohio", "oklahoma", "oregon", "pennsylvania", "rhode island", "south carolina", "south dakota",
-             "tennessee", "texas", "utah", "vermont", "virginia", "washington", "west virginia", "wisconsin", "wyoming")
-US = ("united states", "usa", "u.s.", "san francisco", "seattle", "boston", "austin", "chicago") + US_STATES
-US_ABBR = re.compile(r",\s*(A[LKZR]|C[AOT]|D[EC]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\b")
-CANADA = ("canada", "toronto", "vancouver", "montreal", "ottawa", "calgary", "waterloo", "ontario", "quebec",
-          "british columbia", "alberta", ", on", ", bc", ", qc")
-AUSTRALIA = ("australia", "sydney", "melbourne", "brisbane", "perth", "canberra", "adelaide", ", nsw", ", vic")
-NZ = ("new zealand", "auckland", "wellington", "christchurch")
-
-REGION_WORDS = {
-    "Berlin": ("berlin",),
-    "Germany": GERMANY,
-    "Europe": EUROPE,
-    "United Kingdom": UK,
-    "United States": US,
-    "Canada": CANADA,
-    "Australia": AUSTRALIA,
-    "New Zealand": NZ,
-}
-
-
+# ----------------------------------------------------------------- places ---
 def is_remote(location: str, work_mode: str = "", text: str = "") -> bool:
     s = f"{location} {work_mode}".lower()
     return "remote" in s or "home office" in s or "homeoffice" in s or "anywhere" in s
@@ -70,30 +25,18 @@ def is_remote(location: str, work_mode: str = "", text: str = "") -> bool:
 
 def location_matches(location: str, allowed: list[str], work_mode: str = "") -> Optional[bool]:
     """True/False, or None when the location is unknown (kept, never dropped silently)."""
-    loc = " " + strip_accents(location or "").lower() + " "
-    if not location.strip():
+    from .. import places
+    if not (location or "").strip():
+        return None
+    if not allowed:
         return None
     if "Remote" in allowed and is_remote(location, work_mode):
         return True
-    for region in allowed:
-        words = REGION_WORDS.get(region)
-        if words and any(w in loc for w in words):
-            return True
-        if region == "United States" and US_ABBR.search(location or ""):
-            return True
-    return False
+    return any(places.location_hits(location, p) for p in allowed if p != "Remote")
 
 
 # --------------------------------------------------------------- filtering ---
-# Words that make a title an AI / ML / data role. Deliberately broad: a job is only skipped before
-# reading its description when its title contains none of them (e.g. "Werkstudent Vertrieb").
-FIELD_TITLE = re.compile(
-    r"(\b(ai|ki|ml|bi|nlp|llms?|rag|etl|sql|cv|gen ?ai|mlops|llmops|dataops)\b|\ba\.i\.|data|daten|"
-    r"artificial|künstlich|kuenstlich|intelligen|machine|maschinell|learning|deep|neural|genai|generativ|"
-    r"analy|scien|wissenschaft|statisti|python|algorith|quant|vision|robot|agent|chatbot|prompt|"
-    r"automati|business intelligence|power ?bi|tableau|dashboard|reporting|warehouse|pipeline|cloud|"
-    r"forecast|predict|insight|research|forschung|informatik|computer|software|developer|entwickl|"
-    r"engineer|ingenieur|tech|digital|it[- ]|mathemati|optimi)", re.I)
+FIELD_TITLE = R.DATA_TITLE        # earlier name, kept for the tests and other modules
 
 
 NAV_TITLE = re.compile(r"^\s*(skip (navigation|to (main )?content)|zum inhalt springen|letzte (woche|24 stunden|7 tage)|"
@@ -104,6 +47,10 @@ ROLE_WORD = re.compile(r"werkstudent|student|intern|praktik|thesis|abschluss|tra
                        r"wissenschaft|analyst|analytics|developer|entwickler|manager|consultant|berater|specialist|spezialist|"
                        r"assist|architect|research|forsch|associate|designer|programm|software|data|daten|machine|learning|"
                        r"\bki\b|\bai\b|\bml\b|devops|mitarbeiter|referent|koordinator|techni|position|stelle|job|"
+                       r"nurse|pflege|driver|fahrer|cook|chef|koch|teacher|lehrer|accountant|buchhalt|clerk|mechanic|"
+                       r"electrician|elektrik|worker|operator|cashier|kassier|barista|waiter|server|receptionist|officer|"
+                       r"representative|lawyer|anwalt|pharmacist|apothek|physician|arzt|therapist|sales|vertrieb|"
+                       r"marketing|recruiter|writer|editor|administrator|coordinator|supervisor|lead|head|director|"
                        r"\((m|w|f|d|x|gn|all)[^)]{0,12}\)", re.I)
 
 
@@ -121,12 +68,13 @@ def prefilter_reason(job: RawJob, fp: m.FilterProfile, today: Optional[date] = N
     """Quick checks before fetching a description. Returns a reason to exclude, or None."""
     today = today or date.today()
     title = job.title or ""
-    if not_a_job(title, job.url):
+    if not_a_job(title, job.url) and not (fp.roles and R.title_fits(title, fp.roles) and not NAV_TITLE.match(title.strip())):
         return "Not a job (a link from a search page)"
-    if SENIOR_TITLE.search(title) and not STUDENT_TITLE.search(title):
+    full_time = "Full-time" in (fp.job_types or [])
+    if not full_time and SENIOR_TITLE.search(title) and not STUDENT_TITLE.search(title):
         return "Seniority in title (full-time role)"
-    if title and not FIELD_TITLE.search(title) and not any(w and w.lower() in title.lower() for w in fp.keywords_in or []):
-        return "Not an AI / ML / data role (title)"
+    if title and not R.title_fits(title, fp.roles or [], fp.keywords_in):
+        return "Not one of your job titles (title)"
     if job.posted_date and job.posted_date < today - timedelta(days=fp.days):
         return f"Posted more than {fp.days} days ago ({job.posted_date.isoformat()})"
     comp = (job.company or "").lower()

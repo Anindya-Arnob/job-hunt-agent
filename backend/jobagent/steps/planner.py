@@ -6,45 +6,23 @@
 """
 from __future__ import annotations
 
+from .. import places, roles as R
 from ..schemas import Query
 
-ROLE_TERMS = {
-    "AI Engineering": ["AI Engineer"],
-    "AI/ML Engineering": ["Machine Learning Engineer", "AI ML"],
-    "Data Science": ["Data Science", "Data Scientist"],
-    "Data Engineering": ["Data Engineer"],
-    "Data Analytics Engineering": ["Analytics Engineer", "Data Analyst"],
-    "Gen AI": ["Generative AI", "LLM"],
-    "MLOps / LLMOps": ["MLOps", "LLMOps"],
-    "Machine Learning": ["Machine Learning"],
-}
-JT_EN = {"Internship": ["Intern"], "Working Student": ["Working Student"], "Part-time": ["Part-time"]}
-JT_DE = {"Internship": ["Praktikum"], "Working Student": ["Werkstudent"], "Part-time": ["Teilzeit"]}
+ROLE_TERMS = R.LEGACY                 # the role groups of earlier versions (still searched the same way)
+# words added to a title per job type; "" = the title alone (full-time jobs are most jobs)
+JT_EN = {"Internship": ["Intern"], "Working Student": ["Working Student"], "Part-time": ["Part-time"], "Full-time": [""]}
+JT_DE = {"Internship": ["Praktikum"], "Working Student": ["Werkstudent"], "Part-time": ["Teilzeit"], "Full-time": [""]}
+GERMAN_ONLY_SITES = {"stepstone", "xing"}       # German job boards: places in Germany (and Remote) only
 
-GERMAN_LOCATIONS = {"Berlin", "Germany"}
-LOCATION_SPLITS = {
-    "Germany": ["Berlin", "Munich", "Hamburg", "Frankfurt", "Cologne", "Stuttgart", "Düsseldorf", "Leipzig",
-                "Dresden", "Karlsruhe", "Hannover", "Nuremberg"],
-    "Europe": ["Germany", "Netherlands", "France", "Spain", "Austria", "Switzerland", "Ireland", "Poland",
-               "Sweden", "Denmark", "Belgium", "Italy", "Portugal", "Czechia", "Finland", "Luxembourg"],
-    "United States": ["California", "New York", "Massachusetts", "Washington", "Texas", "Illinois",
-                      "Pennsylvania", "Georgia", "Colorado", "North Carolina", "New Jersey", "Virginia"],
-    "United Kingdom": ["London", "Manchester", "Cambridge", "Oxford", "Edinburgh", "Bristol", "Birmingham"],
-    "Canada": ["Toronto", "Vancouver", "Montreal", "Ottawa", "Calgary", "Waterloo"],
-    "Australia": ["Sydney", "Melbourne", "Brisbane", "Perth", "Canberra"],
-    "New Zealand": ["Auckland", "Wellington", "Christchurch"],
-}
-LINKEDIN_LOCATION = {"Europe": "European Union", "Remote": "Worldwide"}
 
-# Which sites cover which locations
-SITE_LOCATIONS = {
-    "linkedin": None,     # all
-    "indeed": None,
-    "glassdoor": None,
-    "stepstone": GERMAN_LOCATIONS | {"Remote"},
-    "xing": GERMAN_LOCATIONS | {"Remote"},
-    "wellfound": None,
-}
+def covers(site: str, place: str) -> bool:
+    """Does the site search this place?"""
+    if site in GERMAN_ONLY_SITES:
+        return place == "Remote" or places.in_country(place, "DE")
+    return True
+
+
 # Sites whose URL accepts a job-type filter (so the type word is not needed in keywords)
 JT_FILTER_SITES = {"linkedin"}
 # Sites that understand (a OR b) searches: far fewer page loads, so far fewer bot checks
@@ -58,23 +36,24 @@ def _q(w: str) -> str:
 def or_keywords(terms: list[str], words: list[str]) -> str:
     """("Werkstudent" OR "Working Student") ("Data Engineer" OR "MLOps") - Indeed's own syntax."""
     t = terms[0] if len(terms) == 1 else "(" + " OR ".join(_q(x) for x in terms) + ")"
+    words = [w for w in words if w]
     if not words:
         return t
     w = words[0] if len(words) == 1 else "(" + " OR ".join(_q(x) for x in words) + ")"
     return f"{w} {t}"
 
 
-def _role_of(term: str) -> str:
-    return next((r for r, ts in ROLE_TERMS.items() if term in ts), "")
-# Search the most important places first, in case the per-site cap is reached
-LOCATION_PRIORITY = ["Berlin", "Remote", "Germany", "Europe", "United Kingdom", "United States",
-                     "Canada", "Australia", "New Zealand"]
+def _role_of(term: str, roles: list[str] | None = None) -> str:
+    for r in roles or list(ROLE_TERMS):
+        if term in R.terms_for(r):
+            return r
+    return ""
 
 
 def _terms(roles: list[str]) -> list[tuple[str, str]]:
     out = []
     for r in roles:
-        for t in ROLE_TERMS.get(r, [r]):
+        for t in R.terms_for(r):
             out.append((r, t))
     return out
 
@@ -103,7 +82,6 @@ SITE_PLAN = {
 }
 MAX_SEARCHES = 400            # per site and run, whatever you type
 WEIGHT_LABELS = {1: "Normal", 2: "More", 3: "Most"}
-CUSTOM_FIELD = "Your keywords"
 
 
 def site_plan(plan: dict | None, site: str) -> dict:
@@ -141,22 +119,22 @@ def _interleave(lists: list[list]) -> list:
 def site_cells(site: str, roles: list[str], job_types: list[str], locations: list[str], days: int,
                work_modes: list[str] | None = None, keywords_in: list[str] | None = None) -> list[dict]:
     """Every search the site could run, grouped by (place, job field), most useful first inside a group."""
-    allowed = SITE_LOCATIONS.get(site)
-    locs = [l for l in sorted(locations, key=lambda x: LOCATION_PRIORITY.index(x) if x in LOCATION_PRIORITY else 99)
-            if allowed is None or l in allowed]
-    terms = _terms(roles) + [(CUSTOM_FIELD, k) for k in (keywords_in or [])]
+    locs = [l for l in dict.fromkeys(locations) if covers(site, l)]     # in your order: no place comes first
+    terms = _terms(roles)
     cells: list[dict] = []
     for loc in locs:
         wm = "Remote" if loc == "Remote" else ""
-        site_loc = LINKEDIN_LOCATION.get(loc, loc) if site == "linkedin" else loc
-        german = loc in GERMAN_LOCATIONS or (loc == "Remote" and site in ("stepstone", "xing"))
+        site_loc = places.site_location(site, loc)
+        german = places.is_german(loc) or (loc == "Remote" and site in GERMAN_ONLY_SITES)
         if site in OR_SITES and terms:
             words = []
             for jt in job_types:
                 ws = list(JT_EN.get(jt, []))
                 if german:
                     ws = JT_DE.get(jt, []) + ws
-                words += [w for w in ws if w not in words]
+                words += [w for w in ws if w and w not in words]
+            if "Full-time" in job_types:
+                words = []                           # the title alone already finds every job type
             all_terms = [t for _, t in terms]
             cells.append({"place": loc, "field": "", "queries": [Query(
                 site=site, keywords=or_keywords(all_terms, words), location=site_loc, work_mode=wm, days=days,
@@ -177,10 +155,10 @@ def site_cells(site: str, roles: list[str], job_types: list[str], locations: lis
                 for jt in job_types:
                     words = list(JT_EN.get(jt, []))
                     if german:
-                        words = JT_DE.get(jt, []) + ([] if site in ("stepstone", "xing") else words)
+                        words = JT_DE.get(jt, []) + ([] if site in GERMAN_ONLY_SITES else words)
                     for w in words:
-                        per_term.append(Query(site=site, keywords=f"{w} {term}", location=site_loc, work_mode=wm,
-                                              days=days, role=role, place=loc))
+                        per_term.append(Query(site=site, keywords=f"{w} {term}".strip(), location=site_loc,
+                                              work_mode=wm, days=days, role=role, place=loc))
             by_field.setdefault(role, []).append(per_term)
         for field, lists in by_field.items():
             cells.append({"place": loc, "field": field, "queries": _interleave(lists)})
@@ -246,21 +224,26 @@ def plan_for_profile(site: str, fp, plan: dict | None = None) -> list[Query]:
                              max_queries=sp["searches"] - sp["narrow"], plan=plan)
 
 
+def fold_eq(a: str, b: str) -> bool:
+    return places.fold(a) == places.fold(b)
+
+
 def split_query(q: Query) -> list[Query]:
     """A search that hit the site's limit is split by place, then by narrower wording."""
     if len(q.any_terms) > 1:          # OR search: one search per role term first
         return [q.model_copy(update={"keywords": or_keywords([t], q.type_words), "any_terms": [t],
-                                     "role": _role_of(t) or q.role, "split_level": q.split_level + 1})
+                                     "role": q.role if q.role != "" and t in R.terms_for(q.role) else (_role_of(t) or q.role), "split_level": q.split_level + 1})
                 for t in q.any_terms]
     if len(q.type_words) > 1:         # then one per job-type word
         return [q.model_copy(update={"keywords": or_keywords(q.any_terms, [w]), "type_words": [w],
                                      "split_level": q.split_level + 1})
                 for w in q.type_words]
-    base_loc = next((k for k, v in LINKEDIN_LOCATION.items() if v == q.location), q.location)
-    if base_loc in LOCATION_SPLITS and q.split_level == 0:
-        loc_map = (lambda c: c) if q.site != "linkedin" else (lambda c: LINKEDIN_LOCATION.get(c, c))
-        return [q.model_copy(update={"location": loc_map(c), "split_level": q.split_level + 1})
-                for c in LOCATION_SPLITS[base_loc]]
+    base = q.place or next((k for k, v in places.LINKEDIN_NAME.items() if v == q.location), q.location)
+    parts = places.narrower(base) if q.split_level == 0 and fold_eq(q.location, places.site_location(q.site, base)) else []
+    parts = [c for c in parts if covers(q.site, c)]
+    if parts:                         # a country into its cities, a region into its countries
+        return [q.model_copy(update={"location": places.site_location(q.site, c), "split_level": q.split_level + 1})
+                for c in parts]
     if "," in q.job_type:
         return [q.model_copy(update={"job_type": jt, "split_level": q.split_level + 1})
                 for jt in q.job_type.split(",")]
@@ -271,10 +254,11 @@ def split_query(q: Query) -> list[Query]:
 
 
 def plan_feed_queries(roles: list[str], job_types: list[str], locations: list[str]) -> list[dict]:
-    """Bundesagentur searches (Germany only)."""
-    if not ({"Berlin", "Germany"} & set(locations)):
+    """Bundesagentur für Arbeit searches (places in Germany only)."""
+    german = [l for l in locations if places.in_country(l, "DE")]
+    if not german:
         return []
-    loc = "Berlin" if "Germany" not in locations else ""
+    loc = "" if any(places.find(l).kind == "country" for l in german) else places.find(german[0]).name
     out = []
     for _, term in _terms(roles):
         if "Working Student" in job_types:
@@ -283,4 +267,6 @@ def plan_feed_queries(roles: list[str], job_types: list[str], locations: list[st
             out.append({"keywords": term, "location": loc, "angebotsart": 34})
         if "Part-time" in job_types:
             out.append({"keywords": term, "location": loc, "part_time": True})
+        if "Full-time" in job_types:
+            out.append({"keywords": term, "location": loc, "angebotsart": 1})
     return out

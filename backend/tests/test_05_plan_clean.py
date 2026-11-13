@@ -21,10 +21,10 @@ def fp(**kw):
 def test_linkedin_queries_use_url_filter_and_add_werkstudent():
     qs = P.plan_site_queries("linkedin", ROLES, JT, ["Berlin", "United States"], 5)
     kws = {(q.keywords, q.location) for q in qs}
-    assert ("Data Science", "Berlin") in kws and ("Werkstudent Data Science", "Berlin") in kws
+    assert ("Data Science", "Berlin, Germany") in kws and ("Werkstudent Data Science", "Berlin, Germany") in kws
     assert ("Werkstudent Data Science", "United States") not in kws     # German word only for Germany
     assert all(q.job_type == "Internship,Working Student,Part-time" for q in qs if not q.keywords.startswith("Werkstudent"))
-    assert qs[0].location == "Berlin"                                   # Berlin searched first
+    assert qs[0].location == "Berlin, Germany"                          # your first place first (LinkedIn: city, country)
 
 
 def test_other_sites_use_bilingual_type_words():
@@ -56,7 +56,8 @@ def test_max_queries_cap():
 def test_split_query_levels():
     q = Query(site="linkedin", keywords="Data Science", location="Germany", job_type="Internship,Part-time")
     a = P.split_query(q)
-    assert len(a) == len(P.LOCATION_SPLITS["Germany"]) and a[0].location == "Berlin" and a[0].split_level == 1
+    from jobagent import places
+    assert len(a) == len(places.narrower("Germany")) and a[0].location == "Berlin, Germany" and a[0].split_level == 1
     b = P.split_query(a[0])
     assert {x.job_type for x in b} == {"Internship", "Part-time"}
     c = P.split_query(b[0])
@@ -129,10 +130,15 @@ def test_ingest_dedupes_against_today_and_earlier_runs():
 def test_title_filter_skips_unrelated_roles_only():
     from jobagent.steps.clean import prefilter_reason
     from jobagent.schemas import RawJob as R
-    fp = m.FilterProfile(name="t", locations=["Berlin"], days=5)
+    fp = m.FilterProfile(name="t", roles=["Data Science", "Data Engineering"], locations=["Berlin"], days=5)
     keep = ["Werkstudent Data Engineer (m/w/d)", "Praktikum KI-Entwicklung", "Working Student GenAI / LLM",
             "Werkstudent Business Intelligence", "AI/ML Development Intern", "Werkstudent Prozessautomatisierung"]
     skip = ["Werkstudent Vertrieb (m/w/d)", "Praktikum Marketing", "Werkstudent Buchhaltung", "Werkstudent Kundenservice"]
     reason = lambda t: prefilter_reason(R(source="stepstone", title=t, location="Berlin"), fp)
     assert [t for t in keep if reason(t)] == []
-    assert all(reason(t) == "Not an AI / ML / data role (title)" for t in skip)
+    assert all(reason(t) == "Not one of your job titles (title)" for t in skip)
+    # any other job titles work the same way: an accountant's search keeps accounting jobs, skips data jobs
+    fp2 = m.FilterProfile(name="t", roles=["Accountant"], locations=["Berlin"], days=5)
+    reason2 = lambda t: prefilter_reason(R(source="stepstone", title=t, location="Berlin"), fp2)
+    assert reason2("Werkstudent Buchhaltung") is None and reason2("Junior Accountant (m/w/d)") is None
+    assert reason2("Werkstudent Data Engineer (m/w/d)") == "Not one of your job titles (title)"

@@ -340,7 +340,7 @@ No. With Claude Code logged in to your Claude Pro or Max subscription, the app u
 
 <details><summary><b>Which countries and roles does it support?</b></summary>
 
-The defaults target internships, working-student and part-time AI / ML / data roles in Germany, but roles, job types, locations and sources are all editable filter profiles. German-language requirements are detected and shown as deal-breakers.
+It works for any job title in any place: type your job titles and places on the Search screen (suggestions appear as you type: about 150 titles, about 80 countries with their main cities, regions and Remote), pick full-time, part-time, internship or working student, and give some titles or places more weight. Searching, filtering, sorting and scoring all follow what you chose. German-language requirements are detected and shown as deal-breakers.
 </details>
 
 <details><summary><b>A site shows "Verify you are human" or blocks the agent.</b></summary>

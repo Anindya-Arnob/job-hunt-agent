@@ -38,7 +38,35 @@ _GERMAN_REQ = [
 ]
 
 
-def heuristic_classification(title: str, description: str, hint: str = "", location: str = "") -> Classification:
+def _role_for(title: str, text: str, roles: list[str] | None) -> str:
+    """Which of your job titles a job is (from its title first, then its text). Without a profile: the AI /
+    data groups of earlier versions."""
+    from .. import roles as R
+    tl, xl = title.lower(), text.lower()
+    # a profile with the AI / data groups of earlier versions accepts all of them (as before)
+    legacy = not roles or any(r in R.LEGACY for r in roles)
+    allowed = lambda name: legacy or name in roles        # noqa: E731
+    for name, pat in ROLE_RULES:                          # the AI / data groups: precise patterns
+        if allowed(name) and re.search(pat, tl):
+            return name
+    for r in roles or []:                                 # your title (or its other name) in the job title
+        if any(t.lower() in tl for t in R.terms_for(r)):
+            return r
+    for r in roles or []:                                 # a word of your title in the job title
+        rx = R._title_rx((r,))
+        if r not in R.LEGACY and rx and rx.search(R.fold(title)):
+            return r
+    for name, pat in ROLE_RULES:
+        if allowed(name) and re.search(pat, xl):
+            return name
+    for r in roles or []:
+        if r not in R.LEGACY and any(t.lower() in xl for t in R.terms_for(r)):
+            return r
+    return "Other"
+
+
+def heuristic_classification(title: str, description: str, hint: str = "", location: str = "",
+                             roles: list[str] | None = None) -> Classification:
     head = f"{title} {hint}"
     text = f"{title}\n{hint}\n{description}"
     if _WS.search(head) or (_WS.search(description) and not _INTERN.search(head)):
@@ -51,17 +79,8 @@ def heuristic_classification(title: str, description: str, hint: str = "", locat
         jt = "Full-time"
     else:
         jt = "Unclear"
-    role = "Other"
     low = text.lower()
-    for name, pat in ROLE_RULES:
-        if re.search(pat, title.lower()):
-            role = name
-            break
-    else:
-        for name, pat in ROLE_RULES:
-            if re.search(pat, low):
-                role = name
-                break
+    role = _role_for(title, text, roles)
     german = None
     for pat, lvl in _GERMAN_REQ:
         m_ = re.search(pat, low)
@@ -85,11 +104,37 @@ def heuristic_classification(title: str, description: str, hint: str = "", locat
                           salary=sal.group(0) if sal else "", seniority=seniority)
 
 
-def classify_job(job: m.Job) -> Classification:
-    user = (f"TITLE: {job.title}\nCOMPANY: {job.company}\nLOCATION: {job.location}\n"
+def profile_for(job: m.Job) -> Optional[m.FilterProfile]:
+    """The search profile a job was found with (else your default one)."""
+    from sqlmodel import select
+    from .. import db
+    with db.session_scope() as s:
+        run = s.get(m.Run, job.first_seen_run) if job.first_seen_run else None
+        fp = s.get(m.FilterProfile, run.filter_profile_id) if run and run.filter_profile_id else None
+        fp = fp or s.exec(select(m.FilterProfile).where(m.FilterProfile.is_default == True)).first()  # noqa: E712
+        return fp
+
+
+def search_context(fp: Optional[m.FilterProfile]) -> str:
+    """What the candidate is looking for, for the Claude calls."""
+    if not fp:
+        return ""
+    return (f"THE CANDIDATE IS LOOKING FOR\nJob titles: {', '.join(fp.roles or []) or 'any'}\n"
+            f"Job types: {', '.join(fp.job_types or []) or 'any'}\nPlaces: {', '.join(fp.locations or []) or 'anywhere'}\n\n")
+
+
+def classify_job(job: m.Job, fp: Optional[m.FilterProfile] = None) -> Classification:
+    fp = fp or profile_for(job)
+    user = (f"{search_context(fp)}TITLE: {job.title}\nCOMPANY: {job.company}\nLOCATION: {job.location}\n"
             f"SITE LABEL: {job.job_type}\n\nDESCRIPTION:\n{job.full_description[:20000]}")
-    return llm.structured("classify", Classification, llm.prompt("classify"), user,
-                          fake=lambda: heuristic_classification(job.title, job.full_description, job.job_type, job.location))
+    roles = list(fp.roles) if fp and fp.roles else None
+    c = llm.structured("classify", Classification, llm.prompt("classify"), user,
+                       fake=lambda: heuristic_classification(job.title, job.full_description, job.job_type,
+                                                             job.location, roles))
+    if roles and c.role_category != "Other":       # Claude's wording -> your exact title
+        match = next((r for r in roles if r.lower() == (c.role_category or "").lower()), None)
+        c.role_category = match or c.role_category
+    return c
 
 
 def apply_classification(job: m.Job, c: Classification, fp: Optional[m.FilterProfile]) -> m.Job:
@@ -103,13 +148,13 @@ def apply_classification(job: m.Job, c: Classification, fp: Optional[m.FilterPro
     job.salary = job.salary or c.salary
     job.deadline = c.application_deadline
     reason = None
-    allowed_types = set(fp.job_types) if fp else {"Internship", "Working Student", "Part-time"}
-    if c.job_type == "Full-time":
+    allowed_types = set(fp.job_types) if fp and fp.job_types else {"Internship", "Working Student", "Part-time"}
+    if c.job_type == "Full-time" and "Full-time" not in allowed_types:
         reason = "Full-time"
-    elif c.seniority == "senior":
+    elif c.seniority == "senior" and "Full-time" not in allowed_types:
         reason = "Senior role (full-time)"
     elif c.role_category == "Other":
-        reason = "Role not in AI / ML / data scope"
+        reason = "Not one of your job titles"
     elif c.job_type != "Unclear" and c.job_type not in allowed_types:
         reason = f"Job type {c.job_type} not in filter"
     elif fp and fp.language_max not in ("any", "", None) and c.german_required_level:

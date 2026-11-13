@@ -307,7 +307,7 @@ class FilterIn(BaseModel):
 @app.get("/api/filters/options")
 def filter_options():
     from ..browser.connections import list_connections
-    return {"roles": db.ALL_ROLES, "job_types": db.ALL_JOB_TYPES, "locations": db.ALL_LOCATIONS,
+    return {"roles": [], "job_types": db.ALL_JOB_TYPES, "locations": [],
             "work_modes": ["Remote", "Hybrid", "On-site"], "days": [1, 3, 5, 7],
             "language_levels": ["any", "none", "A1", "A2", "B1", "B2", "C1"],
             "sources": [{"id": c["site"], "label": c["label"]} for c in list_connections()]}
@@ -317,6 +317,34 @@ def filter_options():
 def list_filters():
     with db.session_scope() as s:
         return [{**f.model_dump(), "plan": f.plan or {}} for f in s.exec(select(m.FilterProfile)).all()]
+
+
+EXCLUDE_WORDS = ["Senior", "Lead", "Principal", "Head of", "Director", "Manager", "Sales", "Unpaid", "Commission",
+                 "Volunteer", "PhD", "Night shift", "Weekend", "Freelance", "Contract", "Temporary"]
+
+
+@app.get("/api/suggest/{kind}")
+def suggest(kind: str, q: str = "", limit: int = 12):
+    """Suggestions while you type: job titles, places, skills, words to leave out, companies."""
+    from .. import places, roles
+    from ..places import fold
+    limit = max(1, min(30, limit))
+    if kind == "roles":
+        return roles.suggest(q, limit)
+    if kind == "places":
+        return places.suggest(q, limit)
+    if kind in ("skills", "exclude"):
+        from ..vocab import ALL_TERMS
+        pool = (EXCLUDE_WORDS + ALL_TERMS) if kind == "exclude" else ALL_TERMS
+        fq = fold(q)
+        hits = [t for t in pool if fold(t).startswith(fq)] + [t for t in pool if fq and fq in fold(t) and not fold(t).startswith(fq)]
+        return [{"value": t, "label": t} for t in list(dict.fromkeys(hits))[:limit]]
+    if kind == "companies":
+        with db.session_scope() as s:
+            rows = s.exec(select(m.Job.company).where(m.Job.company.ilike(f"%{q}%")).distinct().limit(200)).all() if q else []
+        rows = sorted({r for r in rows if r}, key=lambda c: (not fold(c).startswith(fold(q)), len(c)))
+        return [{"value": c, "label": c} for c in rows[:limit]]
+    raise HTTPException(404, "unknown kind")
 
 
 @app.post("/api/filters/plan")

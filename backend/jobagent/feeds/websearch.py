@@ -75,6 +75,7 @@ class WebQuery:
     terms: list[str]
     type_words: list[str]
     days: int
+    full_time: bool = False          # full-time jobs wanted too (then senior roles are fine as well)
 
     @property
     def label(self) -> str:
@@ -96,30 +97,37 @@ class WebResult:
 # ------------------------------------------------------------------ planning ---
 def plan_web_queries(roles: list[str], job_types: list[str], locations: list[str], days: int,
                      sources: list[str], max_calls: Optional[int] = None) -> list[WebQuery]:
-    from ..steps.planner import JT_DE, JT_EN, ROLE_TERMS
-    wanted_terms = {t for r in roles for t in ROLE_TERMS.get(r, [r])}
+    from .. import places, roles as R
+    from ..steps.planner import JT_DE, JT_EN
+    wanted_terms = {t for r in roles for t in R.terms_for(r)}
     groups = [(g, [t for t in ts if t in wanted_terms]) for g, ts in ROLE_GROUPS]
     groups = [(g, ts) for g, ts in groups if ts]
-    extra = sorted(wanted_terms - {t for _, ts in ROLE_GROUPS for t in ts})
-    if extra:
-        groups.append(("Other roles", extra))
-    locs = [l for l in DEFAULT_LOCATIONS if l in locations] + [l for l in locations if l not in DEFAULT_LOCATIONS]
+    grouped = {t for _, ts in ROLE_GROUPS for t in ts}
+    for r in roles:                          # your other job titles: one group each
+        ts = [t for t in R.terms_for(r) if t not in grouped]
+        if ts:
+            groups.append((r, ts))
+            grouped |= set(ts)
+    locs = list(dict.fromkeys(locations))
     # Claude Code's web search ignores site: filters, so it searches all job sites at once ("web");
     # the API's search tool can be limited to one domain, so it also covers the sites that block browsers.
     per_site = PER_SITE_API if (engine() == "api") else []
     sites = [s for s in SITE_ORDER if (s in per_site and s in sources)] + ["web"]
     out: list[WebQuery] = []
-    for loc in locs:                         # Berlin for every site first, then Germany, ...
-        german = loc in ("Berlin", "Germany")
+    for loc in locs:                         # in your order
+        german = places.is_german(loc)
         words = []
         for jt in job_types:
             ws = (JT_DE.get(jt, []) if german else []) + JT_EN.get(jt, [])
-            words += [w for w in ws if w not in words]
+            words += [w for w in ws if w and w not in words]
+        if "Full-time" in job_types:
+            words = []
         for site in sites:
-            if site in ("stepstone", "xing") and loc not in ("Berlin", "Germany", "Remote"):
+            if site in ("stepstone", "xing") and not (loc == "Remote" or places.in_country(loc, "DE")):
                 continue                     # German job boards
             for g, terms in groups:
-                out.append(WebQuery(site=site, location=loc, group=g, terms=terms, type_words=words, days=days))
+                out.append(WebQuery(site=site, location=loc, group=g, terms=terms, type_words=words, days=days,
+                                    full_time="Full-time" in job_types))
     cap = settings.websearch_max_calls if max_calls is None else max_calls
     return out[:cap] if cap else out
 
@@ -128,23 +136,26 @@ def build_prompt(q: WebQuery, today: Optional[date] = None) -> str:
     today = today or date.today()
     label, domains = WEB_SITES[q.site]
     where = (f"on {label} only" if domains else
-             "on any job board or company career page (Indeed, LinkedIn, StepStone, Glassdoor, XING, arbeitnow, "
-             "workingstudentjobs.de, join.com, company /careers pages, ...)")
-    place = "remote (work from anywhere in Germany / EU)" if q.location == "Remote" else q.location
+             "on any job board or company career page (Indeed, LinkedIn, Glassdoor, the job boards of that country "
+             "or city, company /careers pages, ...)")
+    from .. import places
+    place = "remote (work from anywhere)" if q.location == "Remote" else q.location
+    german = places.is_german(q.location)
+    kind = " / ".join(q.type_words) if q.type_words else "any (full-time included)"
+    example = f"{q.type_words[0] + ' ' if q.type_words else ''}{q.terms[0]}"
     return f"""Find CURRENT job postings {where}.
 
-Looking for: job type {" / ".join(q.type_words)} - roles {", ".join(q.terms)} - location {place}.
+Looking for: job type {kind} - roles {", ".join(q.terms)} - location {place}.
 Only postings from the last {q.days} days if the date is visible (today is {today.isoformat()}).
-Run several different web searches (German and English wording, one role or job-type word per search),
-for example:  "{q.type_words[0] if q.type_words else ''} {q.terms[0]}" {place}   - then the other roles and job-type words.
+Run several different web searches ({'German and English wording, ' if german else ''}one role or job-type word per search),
+for example:  "{example}" {place}   - then the other roles and job-type words.
 
 Rules:
 - Only list single job postings you actually saw in the search results. Never guess or invent a link.
 - "url" must be the exact link of that posting from the search results. If you only saw the job on a
   list/search page, put that page's link in "source_page" and leave "url" empty.
 - "summary": 1-4 sentences with the requirements you saw (skills, tools, languages, hours). Do not invent.
-- Skip full-time-only and senior positions.
-
+{'' if q.full_time else '- Skip full-time-only and senior positions.' + chr(10)}
 Answer with ONLY a JSON array in a ```json block, one object per job:
 {{"title": "", "company": "", "location": "", "url": "", "source_page": "", "posted": "e.g. 2 days ago or 2026-11-03", "job_type": "", "summary": ""}}
 Return [] if you found nothing."""

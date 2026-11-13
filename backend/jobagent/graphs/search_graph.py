@@ -362,7 +362,7 @@ def _classify_ids(run_id: int, fp: m.FilterProfile, ids: list[int], stage_tick=N
             with db.session_scope() as s:
                 job = s.get(m.Job, jid)
             try:
-                c = classify_job(job)
+                c = classify_job(job, fp)
             except llm.BudgetExceeded as e:
                 return ("budget", str(e))
             except Exception as e:

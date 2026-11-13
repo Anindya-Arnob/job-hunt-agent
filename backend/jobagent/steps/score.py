@@ -67,7 +67,7 @@ def candidate_german_level(p: CVProfile) -> Optional[str]:
 
 
 # ---------------------------------------------------------- offline heuristic ---
-def heuristic_score(job: m.Job, p: CVProfile) -> ScoreResult:
+def heuristic_score(job: m.Job, p: CVProfile, fp: Optional[m.FilterProfile] = None) -> ScoreResult:
     ptext = profile_text(p)
     jtext = f"{job.title}\n{job.full_description}"
     wanted = list(dict.fromkeys((job.required_skills or []) + (job.keywords or []) + find_terms(jtext, ALL_TERMS)))[:30]
@@ -98,10 +98,18 @@ def heuristic_score(job: m.Job, p: CVProfile) -> ScoreResult:
     exp_hit = any(sum(1 for t in wanted if term_regex(t).search(" ".join(e.stack + e.bullets))) >= 1 for e in p.experience)
     experience = min(25, 6 + proj_hits * 4 + (5 if exp_hit else 0))
     title_l = job.title.lower()
-    title_fit = 9 if any(w in title_l for w in ("data scien", "machine learning", "ml", "ai", "ki", "nlp", "llm", "genai")) else (
-        6 if any(w in title_l for w in ("data", "analyt")) else 3)
-    edu_text = " ".join(e.degree for e in p.education).lower()
-    education = 9 if "data science" in edu_text or "computer" in edu_text else 7
+    from .. import roles as R
+    wanted_roles = list(fp.roles) if fp and fp.roles else []
+    if wanted_roles and not all(R.is_data(r) for r in wanted_roles):
+        title_fit = 9 if any(t.lower() in title_l for r in wanted_roles for t in R.terms_for(r)) else (
+            6 if R.title_fits(job.title, wanted_roles) else 3)
+        edu_text = " ".join(e.degree for e in p.education).lower()
+        education = 9 if any(w in edu_text for r in wanted_roles for w in R._tokens(r)) else 7
+    else:
+        title_fit = 9 if any(w in title_l for w in ("data scien", "machine learning", "ml", "ai", "ki", "nlp", "llm", "genai")) else (
+            6 if any(w in title_l for w in ("data", "analyt")) else 3)
+        edu_text = " ".join(e.degree for e in p.education).lower()
+        education = 9 if "data science" in edu_text or "computer" in edu_text else 7
     if re.search(r"phd|doctoral|promotion", jtext.lower()):
         education = 4
     deal: list[DealBreaker] = []
@@ -116,16 +124,23 @@ def heuristic_score(job: m.Job, p: CVProfile) -> ScoreResult:
         if gap > 0:
             language = max(0, 10 - 3 * gap)
             deal.append(DealBreaker(text=f"German {req} required (CV: {cand or 'none'})", hard=gap >= 2))
-    loc_ok = location_matches(job.location, ["Berlin", "Remote"], job.work_mode)
-    de_ok = location_matches(job.location, ["Germany"])
-    eu_ok = location_matches(job.location, ["Europe"])
-    type_location = 5 if loc_ok in (True, None) else (4 if de_ok else (3 if eu_ok else 1))
+    from .. import places as PL
+    mine = list(fp.locations) if fp and fp.locations else ["Berlin", "Remote"]
+    loc_ok = location_matches(job.location, mine, job.work_mode)
+    mine_p = [PL.find(x) for x in mine if x != "Remote"]
+    countries = {x.country for x in mine_p if x.country} | {c for x in mine_p if x.kind == "region" for c in x.cities}
+    regions = {x.region for x in mine_p if x.region}
+    job_country = PL.country_of(job.location)
+    same_country = bool(job_country and job_country.name in countries)
+    same_region = bool(job_country and job_country.region in regions)
+    type_location = 5 if loc_ok in (True, None) else (4 if same_country else (3 if same_region else 1))
     if loc_ok is False:
-        where = "Germany" if de_ok else ("EU" if eu_ok else "outside the EU")
-        deal.append(DealBreaker(text=f"On-site in {job.location} ({where}) - relocation needed",
-                                hard=not eu_ok and not de_ok))
-        if not eu_ok and not de_ok:
-            deal.append(DealBreaker(text="Work authorisation outside the EU likely required", hard=True))
+        where = (job_country.name if job_country else "elsewhere")
+        far = not same_country and not same_region
+        deal.append(DealBreaker(text=f"On-site in {job.location} ({where}) - not one of your places, relocation needed",
+                                hard=far and job_country is not None))
+        if far and job_country is not None:
+            deal.append(DealBreaker(text=f"Work authorisation for {job_country.name} likely required", hard=True))
     if re.search(r"must be enrolled|eingeschrieben|immatrikul", jtext.lower()):
         deal.append(DealBreaker(text="Must be enrolled as a student (you are: M.Sc. student - check university requirements)", hard=False))
     return ScoreResult(skills=skills, experience=experience, title_fit=title_fit, education=education,
@@ -136,13 +151,15 @@ def heuristic_score(job: m.Job, p: CVProfile) -> ScoreResult:
 
 
 # --------------------------------------------------------------- the step ---
-def score_job(job: m.Job, profile: CVProfile) -> ScoreResult:
-    user = (f"RESUME (structured JSON):\n{profile.model_dump_json(exclude={'uncertain_fields'})}\n\n"
+def score_job(job: m.Job, profile: CVProfile, fp: Optional[m.FilterProfile] = None) -> ScoreResult:
+    from .classify import profile_for, search_context
+    fp = fp or profile_for(job)
+    user = (f"{search_context(fp)}RESUME (structured JSON):\n{profile.model_dump_json(exclude={'uncertain_fields'})}\n\n"
             f"JOB:\nTitle: {job.title}\nCompany: {job.company}\nLocation: {job.location} ({job.work_mode})\n"
             f"Job type: {job.job_type}\nLanguage requirements: {job.language_req}\n\n"
             f"FULL JOB DESCRIPTION:\n{job.full_description[:20000]}")
     return llm.structured("score", ScoreResult, llm.prompt("score"), user,
-                          fake=lambda: heuristic_score(job, profile))
+                          fake=lambda: heuristic_score(job, profile, fp))
 
 
 def clamp(r: ScoreResult) -> ScoreResult:

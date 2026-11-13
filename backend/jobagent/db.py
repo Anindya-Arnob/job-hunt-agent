@@ -55,7 +55,8 @@ ALL_ROLES = [
     "AI Engineering", "AI/ML Engineering", "Data Science", "Data Engineering",
     "Data Analytics Engineering", "Gen AI", "MLOps / LLMOps", "Machine Learning",
 ]
-ALL_JOB_TYPES = ["Internship", "Working Student", "Part-time"]
+ALL_JOB_TYPES = ["Full-time", "Part-time", "Internship", "Working Student"]
+STUDENT_JOB_TYPES = ["Internship", "Working Student", "Part-time"]
 ALL_LOCATIONS = ["Berlin", "Germany", "Europe", "United Kingdom", "United States",
                  "Canada", "Australia", "New Zealand", "Remote"]
 ALL_SOURCES = ["linkedin", "glassdoor", "indeed", "stepstone", "xing", "wellfound",
@@ -82,15 +83,11 @@ def _add_missing_columns() -> None:
 def seed() -> None:
     with session_scope() as s:
         if not s.exec(select(m.FilterProfile)).first():
+            # a new install starts empty: you type your own job titles and places on the Search screen
             s.add(m.FilterProfile(
-                name="All roles · Internship / Werkstudent / Part-time", roles=ALL_ROLES,
-                job_types=ALL_JOB_TYPES, locations=ALL_LOCATIONS,
-                work_modes=["Remote", "Hybrid", "On-site"], days=5, sources=ALL_SOURCES,
+                name="My job search", roles=[], job_types=["Full-time"], locations=[],
+                work_modes=["Remote", "Hybrid", "On-site"], days=7, sources=ALL_SOURCES,
                 language_max="any", is_default=True))
-            s.add(m.FilterProfile(
-                name="Berlin Werkstudent", roles=ALL_ROLES, job_types=["Working Student"],
-                locations=["Berlin", "Remote"], work_modes=["Remote", "Hybrid", "On-site"],
-                days=5, sources=ALL_SOURCES, language_max="B1"))
         for site in ALL_SOURCES:
             c = s.get(m.Connection, site)
             if not c:

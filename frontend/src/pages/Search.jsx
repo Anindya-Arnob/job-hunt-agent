@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Chrome, ExternalLink, Loader2, Play, Plus, RotateCcw, Save, SkipForward, Square, Trash2, ShieldAlert } from 'lucide-react'
 import { api, fmtTime, SOURCE_LABEL } from '../api'
-import { ChipSelect, StatusBadge, TagInput, useAsync, useToast } from '../ui'
+import { ChipSelect, StatusBadge, useAsync, useToast } from '../ui'
 import { useEvents } from '../events'
 import RunProgress from '../components/RunProgress'
 import SearchPlan from '../components/SearchPlan'
+import SuggestTags from '../components/SuggestTags'
 
-const BLANK = { name: 'New profile', roles: [], keywords_in: [], keywords_out: [], job_types: ['Internship', 'Working Student', 'Part-time'],
-  locations: ['Berlin', 'Remote'], work_modes: ['Remote', 'Hybrid', 'On-site'], days: 5, sources: [], language_max: 'any',
+const BLANK = { name: 'New profile', roles: [], keywords_in: [], keywords_out: [], job_types: ['Full-time'],
+  locations: [], work_modes: ['Remote', 'Hybrid', 'On-site'], days: 7, sources: [], language_max: 'any', plan: {},
   exclude_companies: [], min_salary: 0, is_default: false }
 
 export default function SearchPage() {
@@ -44,6 +45,9 @@ export default function SearchPage() {
   if (!opts.data || !form) return <div className="muted">Loading…</div>
   const O = opts.data
   const set = (k) => (v) => setForm({ ...form, [k]: v })
+  const plan = form.plan || {}
+  const setWeight = (kind, name, w) => setForm({ ...form, plan: { ...plan, [kind]: { ...(plan[kind] || {}), [name]: w } } })
+  const missing = [!form.roles.length && 'a job title', !form.locations.length && 'a place', !form.job_types.length && 'a job type'].filter(Boolean)
   const srcLabels = Object.fromEntries(O.sources.map((s) => [s.id, s.label]))
 
   const save = async () => {
@@ -90,19 +94,26 @@ export default function SearchPage() {
             <div className="flex gap-2">
               {form.id && <button className="btn-danger" onClick={remove}><Trash2 size={14} /></button>}
               <button className="btn-outline" onClick={save}><Save size={14} />Save</button>
-              <button className="btn-teal" onClick={run} disabled={runId && !done}><Play size={14} />Run</button>
+              <button className="btn-teal" onClick={run} disabled={(runId && !done) || missing.length > 0}
+                title={missing.length ? `Add ${missing.join(', ')} first` : ''}><Play size={14} />Run</button>
             </div>
           </div>
           <div className="grid gap-4 p-4 md:grid-cols-2">
-            <div className="md:col-span-2"><span className="label">Roles</span><ChipSelect options={O.roles} value={form.roles} onChange={set('roles')} /></div>
-            <div><span className="label">Must include (any of)</span><TagInput value={form.keywords_in} onChange={set('keywords_in')} placeholder="e.g. NLP" /></div>
-            <div><span className="label">Must not include</span><TagInput value={form.keywords_out} onChange={set('keywords_out')} placeholder="e.g. Sales" /></div>
+            {missing.length > 0 && <div className="md:col-span-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">To search, add {missing.join(', ')}.</div>}
+            <div className="md:col-span-2"><span className="label">Job titles</span>
+              <SuggestTags kind="roles" testId="roles" value={form.roles} onChange={set('roles')} placeholder="Type a job title, e.g. Software Engineer, Nurse, Data Analyst"
+                weights={plan.fields || {}} onWeight={(n, w) => setWeight('fields', n, w)} /></div>
+            <div className="md:col-span-2"><span className="label">Places</span>
+              <SuggestTags kind="places" testId="places" value={form.locations} onChange={set('locations')} placeholder="Type a country, city or Remote, e.g. Canada, Toronto, Remote"
+                weights={plan.places || {}} onWeight={(n, w) => setWeight('places', n, w)} />
+              <p className="mt-1 text-xs muted">Each title and place gets an equal share of the searches. Click <b>Normal</b> on one to give it <b>More</b> (double) or <b>Most</b> (triple).</p></div>
+            <div><span className="label">Must include (any of)</span><SuggestTags kind="skills" value={form.keywords_in} onChange={set('keywords_in')} placeholder="e.g. Python, Excel, SAP" /></div>
+            <div><span className="label">Must not include</span><SuggestTags kind="exclude" value={form.keywords_out} onChange={set('keywords_out')} placeholder="e.g. Senior, Sales" /></div>
             <div><span className="label">Job type</span><ChipSelect options={O.job_types} value={form.job_types} onChange={set('job_types')} /></div>
             <div><span className="label">Work mode</span><ChipSelect options={O.work_modes} value={form.work_modes} onChange={set('work_modes')} /></div>
-            <div className="md:col-span-2"><span className="label">Locations</span><ChipSelect options={O.locations} value={form.locations} onChange={set('locations')} /></div>
             <div><span className="label">Posted within</span>
               <div className="flex gap-1.5">{O.days.map((d) => <button key={d} onClick={() => set('days')(d)} className={`rounded-md border px-3 py-1 text-sm ${form.days === d ? 'border-teal bg-teal-50 font-semibold text-teal-600' : 'border-slate-300 bg-slate-50'}`}>{d} day{d > 1 ? 's' : ''}</button>)}</div></div>
-            <div><span className="label">German level you accept</span>
+            <div><span className="label">German level you accept (jobs that ask for German)</span>
               <select className="input" value={form.language_max} onChange={(e) => set('language_max')(e.target.value)}>
                 <option value="any">Show all jobs (flag German as a deal-breaker)</option>
                 <option value="none">Hide jobs that require German</option>
@@ -111,7 +122,7 @@ export default function SearchPage() {
             <div className="md:col-span-2"><span className="label">Sources</span><ChipSelect options={O.sources.map((s) => s.id)} value={form.sources} onChange={set('sources')} labels={srcLabels} />
               {BROWSER_SITES.some((x) => form.sources.includes(x)) && <BrowserCollect sites={BROWSER_SITES.filter((x) => form.sources.includes(x))} modes={modes} filterId={form.id} />}
               <SearchPlan form={form} onPlan={set('plan')} /></div>
-            <div><span className="label">Exclude companies</span><TagInput value={form.exclude_companies} onChange={set('exclude_companies')} placeholder="Company name" /></div>
+            <div><span className="label">Exclude companies</span><SuggestTags kind="companies" value={form.exclude_companies} onChange={set('exclude_companies')} placeholder="Company name" /></div>
             <div className="flex items-end"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_default} onChange={(e) => set('is_default')(e.target.checked)} />Use for the morning run</label></div>
           </div>
         </div>

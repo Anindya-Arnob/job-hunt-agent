@@ -280,6 +280,14 @@ def test_site_that_refuses_even_after_the_check_switches_to_manual(server, monke
 def test_search_links_and_mode_endpoints():
     from fastapi.testclient import TestClient
     from jobagent.api.main import app
+    from jobagent import db, models as m
+    with db.session_scope() as s:
+        fp = s.exec(m.select(m.FilterProfile)).first() if hasattr(m, "select") else None
+    from sqlmodel import select
+    with db.session_scope() as s:
+        fp = s.exec(select(m.FilterProfile).where(m.FilterProfile.is_default == True)).first()  # noqa: E712
+        fp.roles, fp.locations, fp.job_types = ["Data Science", "Data Engineering"], ["Berlin", "Remote"], ["Working Student"]
+        s.add(fp)
     with TestClient(app) as c:
         assert c.get("/api/sites/indeed/mode").json()["mode"] == "guest"
         c.put("/api/sites/indeed/mode", json={"mode": "manual"})
