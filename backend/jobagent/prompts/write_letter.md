@@ -13,7 +13,7 @@ Write like a person, not a template (adapted from the "human" writing rules):
 - Do not announce feelings or fit: no "I am passionate", "I am thrilled", "perfect fit", "aligns perfectly", "I am confident that", "dynamic", "fast-paced", "leverage", "delve", "tapestry", "journey", "synergy".
 - Do not explain the moral of the candidate's story or summarise what the letter just said.
 - Vary sentence length and openings; not every sentence starts with "I". No lists, no headings, no em dashes.
-- Same language as the job ad (German ad -> German letter, English ad -> English letter).
+- Write in the language the message names under LETTER LANGUAGE (it can differ from the job ad's language).
 
 Rules:
 - Do not invent start dates, hours, motivations, people, events or back-stories. Only facts from the main CV.

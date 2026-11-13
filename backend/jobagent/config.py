@@ -94,6 +94,7 @@ class Settings:
     letter_model: str = field(default_factory=lambda: _env("LETTER_MODEL", ""))
     cv_effort: str = field(default_factory=lambda: _env("CV_EFFORT", "low"))     # low / medium / high (Claude Code)
     cv_projects: int = field(default_factory=lambda: int(_env("CV_PROJECTS", "3")))
+    letter_language: str = field(default_factory=lambda: _env("LETTER_LANGUAGE", "english"))   # english / german / ad
     github_projects: bool = field(default_factory=lambda: _env("GITHUB_PROJECTS", "true").lower() == "true")
     github_user: str = field(default_factory=lambda: _env("GITHUB_USER", ""))    # empty = the GitHub link on your CV
     github_token: str = field(default_factory=lambda: _env("JOBHUNT_GITHUB_TOKEN", ""))  # optional: private repos, higher limit
@@ -155,7 +156,7 @@ class Settings:
         "schedule_enabled", "page_delay_seconds", "max_pages_per_search", "max_details_per_site", "headless_guest",
         "websearch_enabled", "websearch_engine", "websearch_max_calls", "websearch_searches_per_call",
         "websearch_other_sites", "websearch_cli_model", "claude_cli_path", "apply_daily_limit",
-        "cv_model", "letter_model", "cv_effort", "cv_projects", "github_projects", "github_user", "github_token",
+        "cv_model", "letter_model", "letter_language", "cv_effort", "cv_projects", "github_projects", "github_user", "github_token",
         "ats_target", "recruiter_review", "humanize", "state_availability",
         "claude_lean", "claude_skills", "claude_plugins",
     )

@@ -210,3 +210,31 @@ def test_tool_named_in_your_cv_text_is_yours():
                                                                                "Large Language Models", "Kubernetes"]}],
                    experience=[], projects=[{"name": "p", "bullets": ["x"]}], education=[])
     assert qa.unknown_tools(cv, prof) == ["Kubernetes"]
+
+
+def test_letter_language_is_your_choice_and_english_by_default(monkeypatch):
+    from jobagent import llm
+    from jobagent.config import settings
+    from jobagent.schemas import JobForWriting
+    seen = {}
+    real = llm.structured
+
+    def spy(node, schema, system, user, **kw):
+        seen["system"], seen["user"] = system, user
+        return real(node, schema, system, user, **kw)
+    monkeypatch.setattr(llm, "structured", spy)
+    from jobagent.cv import service as CVS
+    from jobagent.schemas import CVProfile
+    prof = CVProfile(name="A B", summary="Student.", skills=[{"category": "ML", "items": ["Python"]}],
+                     projects=[{"name": "P", "bullets": ["x"]}])
+    cv = CVContent(tagline="t", summary="s", skills=[{"category": "ML", "items": ["Python"]}], experience=[],
+                   projects=[{"name": "P", "bullets": ["x"]}], education=[])
+    job = JobForWriting(company="MAHLE", title="Praktikum Machine Learning", job_type="Full-time",
+                        description="Wir suchen dich für unser Team in Stuttgart.")
+    W.write_letter(job, prof, cv)
+    assert "LETTER LANGUAGE: English" in seen["user"] and "Same language as the job ad" not in seen["system"]
+    assert "I am happy to discuss a start date." in seen["user"]          # full-time: no 'working student' line
+    monkeypatch.setattr(settings, "letter_language", "ad")
+    W.write_letter(job, prof, cv)
+    assert "LETTER LANGUAGE: the language of the job ad" in seen["user"]
+    del CVS

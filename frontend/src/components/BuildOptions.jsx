@@ -5,7 +5,7 @@ import { useToast } from '../ui'
 import { ClaudeLoginStatus } from './ClaudeLogin'
 
 // Keys this card owns (the Settings form leaves them alone)
-export const BUILD_KEYS = ['cv_model', 'letter_model', 'cv_effort', 'cv_projects', 'github_projects', 'github_user', 'github_token',
+export const BUILD_KEYS = ['cv_model', 'letter_model', 'letter_language', 'cv_effort', 'cv_projects', 'github_projects', 'github_user', 'github_token',
   'ats_target', 'recruiter_review', 'humanize', 'state_availability', 'claude_lean', 'claude_skills', 'claude_plugins']
 
 const MODELS = [
@@ -75,6 +75,8 @@ export default function BuildOptions({ compact = false }) {
               {MODELS.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Field>
             <Field label="Cover letter"><select className="input" value={f.letter_model} onChange={(e) => set('letter_model', e.target.value)}>
               <option value="">Same as CV</option>{MODELS.slice(1).map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Field>
+            <Field label="Cover letter language" help="English by default, also for German job ads. A German letter suggests you are fluent in German."><select className="input" value={f.letter_language || 'english'} onChange={(e) => set('letter_language', e.target.value)}>
+              <option value="english">English (always)</option><option value="ad">Same as the job ad</option><option value="german">German (always)</option></select></Field>
             <Field label="Effort" help="How long Claude thinks before writing. High used up to 17,000 tokens and 4-5 minutes for one CV; low is usually enough because the app checks every CV."><select className="input" value={f.cv_effort || 'low'} onChange={(e) => set('cv_effort', e.target.value)}>
               {EFFORT.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Field>
             <Field label="Projects on the CV" help="2-6. Many projects get shorter bullets to stay on one page.">

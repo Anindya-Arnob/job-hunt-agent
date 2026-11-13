@@ -219,7 +219,23 @@ def review_cv(job: JobForWriting, truth: CVProfile, cv: CVContent, ats_after: di
 def availability_line(job_type: str) -> str:
     if job_type == "Internship":
         return "I am happy to discuss start date and duration."
-    return "I am available as a working student for up to 20 hours a week."
+    if job_type == "Working Student":
+        return "I am available as a working student for up to 20 hours a week."
+    if job_type == "Part-time":
+        return "I am available part-time and happy to discuss the hours."
+    return "I am happy to discuss a start date."
+
+
+LETTER_LANGUAGE = {
+    "english": "English. Write in English even when the job ad is in German or another language.",
+    "german": "German.",
+    "ad": "the language of the job ad (German ad -> German letter, English ad -> English letter).",
+}
+
+
+def letter_language_line() -> str:
+    from ..config import settings
+    return "LETTER LANGUAGE: " + LETTER_LANGUAGE.get((settings.letter_language or "english").lower(), LETTER_LANGUAGE["english"])
 
 
 def _human_blocker(d: str) -> str:
@@ -301,7 +317,7 @@ def write_letter(job: JobForWriting, prof: CVProfile, cv: CVContent, issues: Opt
     fix = ("\n\nISSUES TO FIX:\n- " + "\n- ".join(issues)) if issues else ""
     user = (f"MAIN CV (only truth):\n{prof.model_dump_json(exclude={'uncertain_fields'})}\n\n"
             f"TAILORED CV:\n{cv.model_dump_json()}\n\n{_job_block(job)}\n\n"
-            f"Availability sentence to use: \"{availability_line(job.job_type)}\"{fix}")
+            f"Availability sentence to use: \"{availability_line(job.job_type)}\"\n\n{letter_language_line()}{fix}")
     if not (job.company or "").strip():
         user += "\n\nThe company name is unknown: write 'your team' instead of a company name."
     out = llm.structured("write_letter", LetterContent, system_prompt("write_letter"), user,
