@@ -46,6 +46,9 @@ class BuildState(TypedDict, total=False):
     issues: list
     attempts: int
     level: int
+    best_cv: Optional[dict]
+    best_qa: list
+    best_ats: dict
     qa_cv: list
     qa_letter: list
     letter_attempts: int
@@ -253,6 +256,7 @@ def next_job(state: BuildState) -> dict:
         events.emit({"type": "build", "message": f"Building CV for {job.company} – {job.title}", "job_id": jid},
                     run_id=state["run_id"])
         return {"queue": queue, "current": jid, "cv": None, "letter": None, "issues": [], "attempts": 0,
+                "best_cv": None, "best_qa": [], "best_ats": {},
                 "level": _start_level(state),
                 "qa_cv": [], "qa_letter": [], "letter_attempts": 0, "results": results}
     return {"queue": [], "current": None, "results": results}
@@ -388,6 +392,13 @@ def render_qa(state: BuildState) -> dict:
     checks += ats.screen_checks(jw, cv, prof, prof, after, settings.ats_target, state.get("fact", ""), pdf_text,
                                 state.get("ats_before"))
     issues = list(state.get("issues", [])) + qa.issues(checks)
+    if issues and state.get("reviewed") and state.get("best_cv"):
+        # the reviewer's changes broke a check the earlier version passed: keep that one, no more rewrites
+        _emit(state, f"CV attempt {state.get('attempts', 1)}: the reviewer's changes failed a check ("
+              + ("; ".join(_short_issue(c) for c in checks if not c.passed and not c.soft) or "; ".join(issues))[:160]
+              + ") - keeping the version that passed every check")
+        return {"cv": state["best_cv"], "qa_cv": state.get("best_qa") or [], "issues": [],
+                "ats_after": state.get("best_ats") or after}
     level = state.get("level", 0)
     if any(c.name == "Exactly 1 page" and not c.passed for c in checks):
         level += 1
@@ -395,8 +406,11 @@ def render_qa(state: BuildState) -> dict:
                  "; ".join(_short_issue(c) for c in checks if not c.passed and not c.soft) or "; ".join(issues)[:200])
           + ("" if not issues or state.get("attempts", 1) >= settings.max_build_attempts else " – rewriting"))
     _emit(state, f"ATS score: {state.get('ats_before', {}).get('score', '?')} → {after['score']}")
-    return {"qa_cv": [c.as_dict() for c in checks], "issues": issues, "level": level, "ats_after": after,
-            "cv": cv.model_dump()}
+    out = {"qa_cv": [c.as_dict() for c in checks], "issues": issues, "level": level, "ats_after": after,
+           "cv": cv.model_dump()}
+    if not issues:                     # the last version that passed every check
+        out.update(best_cv=cv.model_dump(), best_qa=out["qa_cv"], best_ats=after)
+    return out
 
 
 def route_cv(state: BuildState) -> str:

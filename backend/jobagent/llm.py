@@ -210,7 +210,9 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
     schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
     tail = (f"Return ONLY one JSON object that validates against this JSON Schema. "
             f"No explanation, no code fence.\nJSON SCHEMA:\n{schema_json}")
-    effort = settings.cv_effort if node in ("write_cv", "write_letter", "review_cv") else ""
+    # without a level Claude decides itself and thought for 12,000-17,000 tokens per CV (minutes each);
+    # a rule-bound rewrite does not need that: low unless you chose more in Build options
+    effort = (settings.cv_effort or "low") if node in ("write_cv", "write_letter", "review_cv") else ""
     last, fix = None, ""
     for attempt in range(2):
         with tempfile.TemporaryDirectory() as cwd:

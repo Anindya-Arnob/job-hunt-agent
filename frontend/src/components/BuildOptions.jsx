@@ -15,7 +15,7 @@ const MODELS = [
   { v: 'opus', l: 'Opus · best writing, most tokens' },
   { v: 'fable', l: 'Fable · newest top model' },
 ]
-const EFFORT = [{ v: '', l: 'Default' }, { v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High' }]
+const EFFORT = [{ v: 'low', l: 'Low – fast, fewest tokens (recommended)' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High – slow, many tokens' }]
 
 const Field = ({ label, help, children }) => (
   <label className="block"><span className="label">{label}</span>{children}{help && <span className="mt-1 block text-xs muted">{help}</span>}</label>)
@@ -75,7 +75,7 @@ export default function BuildOptions({ compact = false }) {
               {MODELS.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Field>
             <Field label="Cover letter"><select className="input" value={f.letter_model} onChange={(e) => set('letter_model', e.target.value)}>
               <option value="">Same as CV</option>{MODELS.slice(1).map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Field>
-            <Field label="Effort" help="Higher thinks longer and uses more of your limit."><select className="input" value={f.cv_effort} onChange={(e) => set('cv_effort', e.target.value)}>
+            <Field label="Effort" help="How long Claude thinks before writing. High used up to 17,000 tokens and 4-5 minutes for one CV; low is usually enough because the app checks every CV."><select className="input" value={f.cv_effort || 'low'} onChange={(e) => set('cv_effort', e.target.value)}>
               {EFFORT.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Field>
             <Field label="Projects on the CV" help="2-6. Many projects get shorter bullets to stay on one page.">
               <input type="number" min={2} max={6} className="input" value={f.cv_projects} onChange={(e) => set('cv_projects', Math.max(2, Math.min(6, +e.target.value || 3)))} /></Field>

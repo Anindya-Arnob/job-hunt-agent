@@ -72,8 +72,12 @@ def test_the_same_job_is_not_built_twice_at_once(setup, monkeypatch):  # noqa: F
         assert b["run_id"] == a["run_id"] and b["already_building"] == [setup["good"]]
         both = c.post("/api/build", json={"job_ids": [setup["good"], setup["accent"]], "rebuild": True}).json()
         assert both["already_building"] == [setup["good"]] and both["run_id"] != a["run_id"]
-        assert gate["started"] == [[setup["good"]], [setup["accent"]]]       # each job once
         import time
+        for _ in range(30):
+            if len(gate.get("started", [])) == 2:
+                break
+            time.sleep(0.05)
+        assert gate["started"] == [[setup["good"]], [setup["accent"]]]       # each job once
         for _ in range(40):
             if not c.get("/api/build/active").json():
                 break
@@ -129,3 +133,53 @@ def test_no_gender_tags_in_letters_or_form_answers():
         assert strip_gender(raw) == clean, raw
     ans = _parse_answers('{"answers": {"q1": "I am applying for the Praktikant (m/w/d) role at Marquardt.", "q2": null}}')
     assert ans == {"q1": "I am applying for the Praktikant role at Marquardt.", "q2": None}
+
+
+def test_claude_thinks_briefly_unless_you_choose_more(monkeypatch):
+    """Measured on a real build: without a level Claude Code thought for 12,000-17,000 tokens per CV."""
+    import json
+    from jobagent import claude_code, llm
+    from jobagent.config import settings
+    from jobagent.schemas import CheckResult
+    from test_23_cv_options import HELP
+    seen = {}
+
+    class Out:
+        stdout = json.dumps({"result": json.dumps({"passed": True, "issues": []}), "usage": {}}).encode()
+        stderr = b""
+    monkeypatch.setattr(llm, "_run_claude", lambda cmd, prompt, cwd, timeout=420: (seen.setdefault("cmds", []).append(cmd), Out())[1])
+    monkeypatch.setattr(claude_code, "exe", lambda: "/usr/bin/claude")
+    monkeypatch.setattr(claude_code, "help_text", lambda e=None: HELP)
+    monkeypatch.setattr(claude_code, "installed_plugins", lambda: {})
+    for chosen, want in (("", "low"), ("high", "high")):
+        monkeypatch.setattr(settings, "cv_effort", chosen)
+        llm._cli_structured("write_cv", CheckResult, "S", "U")
+        cmd = seen["cmds"][-1]
+        assert cmd[cmd.index("--effort") + 1] == want
+    llm._cli_structured("mail_jobs", CheckResult, "S", "U")
+    assert "--effort" not in seen["cmds"][-1]                         # other calls unchanged
+
+
+def test_a_reviewer_fix_that_breaks_a_check_does_not_start_more_rewrites(setup, monkeypatch):  # noqa: F811
+    from jobagent.config import settings
+    from jobagent.schemas import ReviewResult
+    monkeypatch.setattr(settings, "recruiter_review", True)
+    calls = []
+    real = W.write_cv
+
+    def writer(*a, **kw):
+        calls.append(1)
+        cv = real(*a, **kw)
+        if len(calls) > 1:                  # the version after the review names a tool the main CV does not have
+            cv.skills[0].items.append("Kubernetes Operator SDK")
+        return cv
+    monkeypatch.setattr(W, "write_cv", writer)
+    monkeypatch.setattr(W, "review_cv", lambda *a, **k: ReviewResult(verdict="maybe", reason="ok",
+                                                                    fixes=["Shorten the tagline"]))
+    out = asyncio.run(B.start_build([setup["good"]], rebuild=True))
+    msgs = [e["message"] for e in B.events.recent(out["run_id"], 500)]
+    assert len(calls) == 2, msgs                                    # first version + one try with the fixes
+    assert any("keeping the version that passed every check" in mm for mm in msgs)
+    with db.session_scope() as s:
+        doc = s.exec(select(m.Document).where(m.Document.job_id == setup["good"], m.Document.kind == "cv")).first()
+    assert doc.qa_passed and "Kubernetes Operator SDK" not in str(doc.content)

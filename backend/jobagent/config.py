@@ -92,7 +92,7 @@ class Settings:
     # --- CV building -------------------------------------------------------------
     cv_model: str = field(default_factory=lambda: _env("CV_MODEL", ""))          # haiku / sonnet / opus / fable / model id
     letter_model: str = field(default_factory=lambda: _env("LETTER_MODEL", ""))
-    cv_effort: str = field(default_factory=lambda: _env("CV_EFFORT", ""))        # low / medium / high (Claude Code)
+    cv_effort: str = field(default_factory=lambda: _env("CV_EFFORT", "low"))     # low / medium / high (Claude Code)
     cv_projects: int = field(default_factory=lambda: int(_env("CV_PROJECTS", "3")))
     github_projects: bool = field(default_factory=lambda: _env("GITHUB_PROJECTS", "true").lower() == "true")
     github_user: str = field(default_factory=lambda: _env("GITHUB_USER", ""))    # empty = the GitHub link on your CV
