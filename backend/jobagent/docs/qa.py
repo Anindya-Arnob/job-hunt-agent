@@ -129,8 +129,21 @@ def cv_tools(c: CVContent) -> list[str]:
 
 
 def unknown_tools(c: CVContent, prof: CVProfile) -> list[str]:
+    """Tools in the tailored CV that your main CV does not show. A tool named anywhere in your main CV (a bullet
+    or the summary, not only a skills list) is yours: otherwise this check and 'Keeps the keywords your main CV
+    had' contradicted each other (one removed 'Large Language Models', the other put it back) and every round
+    cost a rewrite."""
+    from ..steps.score import profile_text
+    from ..vocab import term_regex
     allowed = {norm_tool(t) for t in profile_tools(prof)}
-    return [t for t in cv_tools(c) if not _match_tool(t, allowed)]
+    text = profile_text(prof)
+
+    def known(t: str) -> bool:
+        if _match_tool(t, allowed):
+            return True
+        forms = {t, re.sub(r"\s*\([^)]*\)", "", t).strip(), *re.findall(r"\(([^)]+)\)", t)}
+        return any(f and len(f) > 1 and term_regex(f).search(text) for f in forms)
+    return [t for t in cv_tools(c) if not known(t)]
 
 
 def cv_text_for_numbers(c: CVContent) -> str:

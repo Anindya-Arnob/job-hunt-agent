@@ -197,3 +197,16 @@ def test_letter_may_name_numbers_from_the_job_ad(setup):  # noqa: F811
     ad = "Praktikum für 5 Monate. Rund 4.000 Mitarbeitende weltweit."
     nums = next(c for c in qa.check_letter(L, prof, None, {}, job_text=ad) if c.name.startswith("Only numbers"))
     assert not nums.passed and nums.detail == "37"                  # from the ad: fine; invented: still caught
+
+
+def test_tool_named_in_your_cv_text_is_yours():
+    """Seen on a real build: 'tools not on your CV (Large Language Models)' vs 'Keeps the keywords your main CV
+    had (put back: Large Language Models)' - three rewrites going back and forth."""
+    from jobagent.docs import qa
+    from jobagent.schemas import CVProfile
+    prof = CVProfile(name="A", summary="M.Sc. student building Large Language Models and RAG systems.",
+                     skills=[{"category": "ML", "items": ["PyTorch"]}])
+    cv = CVContent(tagline="t", summary="s", skills=[{"category": "ML", "items": ["PyTorch", "Large Language Models (LLMs)",
+                                                                               "Large Language Models", "Kubernetes"]}],
+                   experience=[], projects=[{"name": "p", "bullets": ["x"]}], education=[])
+    assert qa.unknown_tools(cv, prof) == ["Kubernetes"]
