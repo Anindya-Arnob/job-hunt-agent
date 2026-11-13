@@ -101,7 +101,7 @@ class Settings:
     ats_target: int = field(default_factory=lambda: int(_env("ATS_TARGET", "75")))
     recruiter_review: bool = field(default_factory=lambda: _env("RECRUITER_REVIEW", "true").lower() == "true")
     humanize: bool = field(default_factory=lambda: _env("HUMANIZE", "true").lower() == "true")
-    state_availability: bool = field(default_factory=lambda: _env("STATE_AVAILABILITY", "true").lower() == "true")
+    state_availability: bool = field(default_factory=lambda: _env("STATE_AVAILABILITY", "false").lower() == "true")
     # --- Claude Code extras ----------------------------------------------------------
     claude_lean: bool = field(default_factory=lambda: _env("CLAUDE_LEAN", "true").lower() == "true")
     claude_skills: bool = field(default_factory=lambda: _env("CLAUDE_SKILLS", "false").lower() == "true")

@@ -238,3 +238,27 @@ def test_letter_language_is_your_choice_and_english_by_default(monkeypatch):
     W.write_letter(job, prof, cv)
     assert "LETTER LANGUAGE: the language of the job ad" in seen["user"]
     del CVS
+
+
+def test_availability_goes_in_the_letter_never_in_the_cv(setup, monkeypatch):  # noqa: F811
+    """'Available for a 6-month internship, can start immediately; holds a German work permit, no visa
+    sponsorship needed' ended every CV summary. The summary is about studies, skills and experience."""
+    from jobagent import llm
+    from jobagent.config import settings
+    from jobagent.docs import ats
+    monkeypatch.setattr(settings, "state_availability", True)
+    monkeypatch.setattr(ats, "availability_fact", lambda jt: "Available for a 6-month internship; can start immediately.")
+    seen = {}
+    real = llm.structured
+
+    def spy(node, schema, system, user, **kw):
+        seen.setdefault(node, []).append(user)
+        return real(node, schema, system, user, **kw)
+    monkeypatch.setattr(llm, "structured", spy)
+    out = asyncio.run(B.start_build([setup["good"]], rebuild=True))
+    assert not any("6-month" in u for u in seen["write_cv"])
+    assert any("6-month internship" in u for u in seen["write_letter"])
+    with db.session_scope() as s:
+        cv = s.exec(select(m.Document).where(m.Document.job_id == setup["good"], m.Document.kind == "cv")).first()
+    assert "6-month" not in cv.content["summary"] and "States your availability" not in str(cv.qa_results)
+    assert out["run_id"]

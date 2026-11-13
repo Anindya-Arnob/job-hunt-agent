@@ -130,8 +130,7 @@ def heuristic_cv(job: JobForWriting, prof: CVProfile, level: int = 0, picked: in
                                   stack=e.stack[:8], bullets=[_first_sentence_limit(b, 32 - 3 * min(level, 3)) for b in bullets]))
     summary = _first_sentence_limit(_swap_wording(prof.summary.replace(" — ", ", "), job), 62 - 6 * min(level, 3))
     summary = re.sub(r"(?<![A-Za-z])(I am|I'm|I have|I)\s+", "", summary)
-    if fact:
-        summary = (summary.rstrip(".") + ". " + fact).strip()
+    fact = ""                          # availability goes in the cover letter, not the CV
     focus = [t for t in terms if t in ("Machine Learning", "Deep Learning", "NLP", "LLM", "RAG", "Generative AI",
                                        "Data Engineering", "MLOps", "Computer Vision", "Data Science", "Python", "SQL")][:3]
     base = prof.tagline.split("·")[0].strip() if prof.tagline else "Data Science M.Sc. Student"
@@ -179,8 +178,7 @@ def write_cv(job: JobForWriting, prof: CVProfile, issues: Optional[list[str]] = 
                   f"(best match first; projects from GitHub are described only by their README facts): "
                   + "; ".join(p.name for p in prof.projects) + ". Pick the ones a recruiter for THIS job cares "
                   "about most, most relevant first.")
-    if fact:
-        extra += f"\n\nAVAILABILITY (end the summary with this, in your words, keep the numbers): {fact}"
+    # (availability is never part of the CV: it goes in the cover letter)
     from ..docs.ats import core_title
     extra += f"\n\nTARGET ROLE WORDS for the tagline: {core_title(job.title) or job.title}"
     user = f"MAIN CV (only truth):\n{prof.model_dump_json(exclude={'uncertain_fields'})}\n\n{_job_block(job)}{extra}{fix}"
@@ -313,11 +311,14 @@ def tidy_letter(L: LetterContent, job: JobForWriting) -> LetterContent:
     return L
 
 
-def write_letter(job: JobForWriting, prof: CVProfile, cv: CVContent, issues: Optional[list[str]] = None) -> LetterContent:
+def write_letter(job: JobForWriting, prof: CVProfile, cv: CVContent, issues: Optional[list[str]] = None,
+                 fact: str = "") -> LetterContent:
     fix = ("\n\nISSUES TO FIX:\n- " + "\n- ".join(issues)) if issues else ""
     user = (f"MAIN CV (only truth):\n{prof.model_dump_json(exclude={'uncertain_fields'})}\n\n"
             f"TAILORED CV:\n{cv.model_dump_json()}\n\n{_job_block(job)}\n\n"
-            f"Availability sentence to use: \"{availability_line(job.job_type)}\"\n\n{letter_language_line()}{fix}")
+            f"Availability sentence to use: \"{availability_line(job.job_type)}\""
+            + (f"\nAlso say, in one sentence in the last paragraph (keep its facts, no new ones): {fact}" if fact else "")
+            + f"\n\n{letter_language_line()}{fix}")
     if not (job.company or "").strip():
         user += "\n\nThe company name is unknown: write 'your team' instead of a company name."
     out = llm.structured("write_letter", LetterContent, system_prompt("write_letter"), user,

@@ -223,7 +223,8 @@ def test_build_uses_github_project_count_and_records_ats(master_cv_path, fake_gi
     assert [p["name"] for p in used] == r["projects"]
     _debug_dump(r, content, doc.qa_results)
     cv = CVContent.model_validate(content)
-    assert "20" in cv.summary and "AI & Automation" in cv.tagline
+    # availability (20 hours, enrolled until 2027) is for the cover letter, never the CV summary
+    assert "hours" not in cv.summary and "AI & Automation" in cv.tagline
     assert not any(c["name"].startswith("Only tools") and not c["passed"] for c in doc.qa_results)
 
 

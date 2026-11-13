@@ -41,12 +41,28 @@ export function BuildingNote({ b, onStopped }) {
     <div className="mt-1 flex items-center gap-1.5 text-xs text-teal-600" data-testid="building-note">
       <Loader2 size={12} className="shrink-0 animate-spin" />
       <span className="min-w-0 truncate" title={b.last}>
-        {b.state === 'waiting' ? 'Waiting for its turn' : `Building${b.attempt ? ` · attempt ${b.attempt}` : ''} · ${mins} min`} – {b.last}
+        {b.state === 'waiting' ? 'Waiting for its turn (CVs are built one after another)' : `Building${b.attempt ? ` · attempt ${b.attempt}` : ''} · ${mins} min – ${b.last}`}
       </span>
       <button type="button" onClick={stop} data-testid="stop-build"
         title={others ? `Stops this build and the ${others} other job(s) queued in it` : 'Stop building this CV'}
         className="ml-1 inline-flex shrink-0 items-center gap-1 rounded border border-rose-200 px-1.5 py-0.5 font-semibold text-rose-600 hover:bg-rose-50">
         <Square size={10} />{armed ? (others ? `Stop all ${others + 1}?` : 'Stop?') : 'Stop'}</button>
+    </div>
+  )
+}
+
+// Every CV being built right now, wherever it was started (Apply, Build queue, Job board), with Stop.
+export function BeingBuilt({ builds, onStopped, note = 'also when you started it on another screen' }) {
+  if (!builds.list.length) return null
+  return (
+    <div className="card" data-testid="being-built">
+      <div className="card-h">Being built right now ({builds.list.length})<span className="text-xs font-normal muted">{note}</span></div>
+      <div className="divide-y divide-slate-100">
+        {builds.list.map((b) => (
+          <div key={b.job_id} className="px-4 py-2.5 text-sm"><div className="font-semibold">{b.company} – {b.title}</div>
+            <BuildingNote b={b} onStopped={() => { builds.reload(); onStopped && onStopped() }} /></div>
+        ))}
+      </div>
     </div>
   )
 }

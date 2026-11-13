@@ -90,8 +90,8 @@ export default function BuildOptions({ compact = false }) {
               help="One extra pass reads the CV like a recruiter, names knock-outs (e.g. German C1) and applies true fixes. Costs one more call." />
             <Toggle on={f.humanize} onChange={(v) => set('humanize', v)} title="Human-sounding writing"
               help="Built-in rules against AI-sounding phrases, for the CV and the letter. No plugin needed." />
-            <Toggle on={f.state_availability} onChange={(v) => set('state_availability', v)} title="State your availability"
-              help="Werkstudent / internship CVs end the summary with hours per week, enrolment and work permit from My details." />
+            <Toggle on={f.state_availability} onChange={(v) => set('state_availability', v)} title="Availability in the cover letter"
+              help="A sentence in the cover letter from My details: hours per week or internship length, start date, work permit. Never in the CV: its summary is about your studies, skills and experience." />
           </div>
         </div>
         <div className="space-y-3">

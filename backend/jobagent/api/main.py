@@ -1107,7 +1107,8 @@ def list_documents(job_id: Optional[int] = None):
         q = select(m.Document)
         if job_id:
             q = q.where(m.Document.job_id == job_id)
-        docs = s.exec(q.order_by(m.Document.id.desc())).all()
+        # newest build first: a rebuild updates the same document, so ordering by id kept rebuilt CVs at the bottom
+        docs = s.exec(q.order_by(m.Document.built_at.desc(), m.Document.id.desc())).all()
         jobs = {j.id: j for j in s.exec(select(m.Job)).all()}
     out = []
     for d in docs:

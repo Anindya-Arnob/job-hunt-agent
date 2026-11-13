@@ -13,5 +13,5 @@ Hard rules:
 8. Keep project names, organisation names, dates and links exactly as in the main CV.
 9. Tagline: your status plus the posting's own role words (TARGET ROLE WORDS), e.g. "Data Science M.Sc. Student · AI & Automation". Recruiters and ATS look for the job title first.
 10. No first person anywhere in the CV ("I", "my", "me"). Start bullets with what was done (built, trained, automated), never "Responsible for", "Worked on", "Helped".
-11. If AVAILABILITY is given, the summary ends with it (keep its numbers and facts, no new ones).
+11. The summary is about the candidate's studies, skills and experience that THIS job asks for: degree and field, the 3-5 skills or tools from the posting the candidate really has, and the most relevant project or experience. Never put availability, start dates, internship length, hours per week, work permit, visa or sponsorship in the CV (those belong in the cover letter).
 12. Use the posting's exact spelling for every keyword the candidate really has (e.g. "LLMs" if the ad says "LLMs"), at least once, in the skills or a bullet.

@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Mai
 import { api, fileUrl, fmtDate, fmtDateTime } from '../api'
 import { Empty, Tabs, useAsync, useToast } from '../ui'
 import { useOnEvent } from '../events'
-import { BuildingNote, useActiveBuilds } from '../components/ActiveBuilds'
+import { BeingBuilt, BuildingNote, useActiveBuilds } from '../components/ActiveBuilds'
 
 function ScorePill({ score }) {
   if (score === null || score === undefined) return <span className="text-slate-300">–</span>
@@ -113,7 +113,7 @@ export default function Apply() {
   useEffect(() => { if (q.data && sel === null) setSel(new Set()) }, [q.data]) // eslint-disable-line
   useOnEvent((ev) => {
     if (ev.type === 'apply') { refresh(); act.reload(); ext.reload(); if (ev.result || ['done', 'stopped'].includes(ev.state)) { q.reload(); hist.reload() } }
-    if (['run_done', 'run_failed', 'run_cancelled'].includes(ev.type) && ev.run_id) q.reload()
+    if (['run_done', 'run_failed', 'run_cancelled'].includes(ev.type) && ev.run_id) { q.reload(); builds.reload() }
   }, [])
   const rebuild = async (ids) => {
     ids = ids.filter((id) => !builds.byJob[id])
@@ -174,6 +174,7 @@ export default function Apply() {
         </div>)}
 
       <ExtensionCard ext={ext.data} active={act.data?.job} onStop={stopBrowser} />
+      <BeingBuilt builds={builds} onStopped={() => q.reload()} note="new CVs appear in the list below when they are done" />
 
       {st?.running && <Live st={st} onControl={control} />}
       {!st?.running && st?.history?.length > 0 && (

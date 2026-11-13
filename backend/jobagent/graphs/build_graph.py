@@ -295,8 +295,9 @@ def write_cv(state: BuildState) -> dict:
     prof = _writer(state)
     job, sc = _load(state["current"])
     cv = W.write_cv(_jw(state, job, sc), prof, state.get("issues") or None, level=state.get("level", 0),
-                    picked=(state.get("proj_info") or {}).get("want", 0) if state.get("wprof") else 0,
-                    fact=state.get("fact", ""))
+                    picked=(state.get("proj_info") or {}).get("want", 0) if state.get("wprof") else 0)
+    # availability / start date / work permit never go in the CV: the summary is about studies, skills and
+    # experience for this job; that line belongs in the cover letter
     cv = W.limit_em_dashes(cv)
     return {"cv": cv.model_dump(), "attempts": state.get("attempts", 0) + 1}
 
@@ -389,7 +390,7 @@ def render_qa(state: BuildState) -> dict:
             pdf_text = "\n".join((pg.extract_text() or "") for pg in PdfReader(str(pdf)).pages)
         except Exception:
             pdf_text = None
-    checks += ats.screen_checks(jw, cv, prof, prof, after, settings.ats_target, state.get("fact", ""), pdf_text,
+    checks += ats.screen_checks(jw, cv, prof, prof, after, settings.ats_target, "", pdf_text,
                                 state.get("ats_before"))
     issues = list(state.get("issues", [])) + qa.issues(checks)
     if issues and state.get("reviewed") and state.get("best_cv"):
@@ -453,7 +454,8 @@ def write_letter(state: BuildState) -> dict:
     prof = _truth(state)
     job, sc = _load(state["current"])
     issues = [c["detail"] or c["name"] for c in state.get("qa_letter", []) if not c["passed"]]
-    L = W.write_letter(_jw(state, job, sc), prof, CVContent.model_validate(state["cv"]), issues or None)
+    L = W.write_letter(_jw(state, job, sc), prof, CVContent.model_validate(state["cv"]), issues or None,
+                       fact=state.get("fact", ""))
     return {"letter": L.model_dump(), "letter_attempts": state.get("letter_attempts", 0) + 1}
 
 

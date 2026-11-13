@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronDown, Hammer, Play, SlidersHorizontal } from 'lucide-react'
-import { api, fmtTime } from '../api'
+import { api, fmtDateTime, fmtTime } from '../api'
 import { CheckList, Empty, ScoreBar, StatusBadge, useAsync, useToast, VerdictBadge } from '../ui'
 import { useEvents, useOnEvent } from '../events'
-import { BuildingNote, useActiveBuilds } from '../components/ActiveBuilds'
+import { BeingBuilt, useActiveBuilds } from '../components/ActiveBuilds'
 import BuildOptions from '../components/BuildOptions'
 import { AtsBadge } from '../components/AtsPanel'
 
@@ -17,7 +17,7 @@ export default function BuildQueue() {
   const [showOpts, setShowOpts] = useState(false)
   const { events } = useEvents()
   const builds = useActiveBuilds()
-  useOnEvent((ev) => { if (['run_done', 'run_failed', 'review', 'run_started'].includes(ev.type)) { runs.reload(); docs.reload(); cands.reload() } }, [])
+  useOnEvent((ev) => { if (['run_done', 'run_failed', 'run_cancelled', 'review', 'run_started'].includes(ev.type)) { runs.reload(); docs.reload(); cands.reload() } }, [])
 
   const buildRuns = (runs.data || []).filter((r) => r.kind === 'build')
   const paused = buildRuns.find((r) => r.status === 'paused')
@@ -54,15 +54,7 @@ export default function BuildQueue() {
       <button className="btn-outline" onClick={() => setShowOpts(!showOpts)}><SlidersHorizontal size={14} />Build options: model, projects, GitHub, ATS
         <ChevronDown size={14} className={`transition ${showOpts ? 'rotate-180' : ''}`} /></button>
       {showOpts && <BuildOptions compact />}
-      {builds.list.length > 0 && (
-        <div className="card" data-testid="being-built">
-          <div className="card-h">Being built right now ({builds.list.length})<span className="text-xs font-normal muted">also when you started it on another screen</span></div>
-          <div className="divide-y divide-slate-100">
-            {builds.list.map((b) => (
-              <div key={b.job_id} className="px-4 py-2.5 text-sm"><div className="font-semibold">{b.company} – {b.title}</div><BuildingNote b={b} onStopped={() => { builds.reload(); runs.reload() }} /></div>
-            ))}
-          </div>
-        </div>)}
+      <BeingBuilt builds={builds} onStopped={() => runs.reload()} />
       <div className="grid gap-5 xl:grid-cols-5">
         <div className="card xl:col-span-3">
           <div className="card-h">{paused ? 'Waiting for your review – tick the jobs to build' : 'Ready to build (score 40+)'}
@@ -108,12 +100,13 @@ export default function BuildQueue() {
         </div>
       </div>
       <div className="card">
-        <div className="card-h">Built documents</div>
+        <div className="card-h">Built documents<span className="text-xs font-normal muted">newest first</span></div>
         {!Object.keys(byJob).length ? <Empty title="No documents yet" /> : (
           <div className="divide-y divide-slate-100">
             {Object.entries(byJob).map(([jid, g]) => (
               <div key={jid} className="grid gap-3 p-4 md:grid-cols-3">
                 <div><Link to={`/jobs/${jid}`} className="font-semibold hover:text-teal">{g.title}</Link><div className="flex items-center gap-2 text-xs muted">{g.company}<AtsBadge ats={g.docs.find((d) => d.kind === 'cv')?.ats} /></div>
+                  <div className="text-xs muted">built {fmtDateTime(g.docs[0]?.built_at)}</div>
                   <Link to={`/documents?job=${jid}`} className="text-xs text-teal">Preview & edit →</Link></div>
                 {g.docs.sort((a, b) => a.kind.localeCompare(b.kind)).map((d) => (
                   <div key={d.id}><div className="mb-1 text-xs font-semibold uppercase muted">{d.kind === 'cv' ? 'CV' : 'Cover letter'} · {d.attempts} attempt{d.attempts > 1 ? 's' : ''}</div><CheckList checks={d.qa_results} />
