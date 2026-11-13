@@ -197,7 +197,8 @@ def check_cv(content: CVContent, prof: CVProfile, docx: Path, pdf: Optional[Path
     return checks
 
 
-def check_letter(letter: LetterContent, prof: CVProfile, pdf: Optional[Path], style: dict) -> list[Check]:
+def check_letter(letter: LetterContent, prof: CVProfile, pdf: Optional[Path], style: dict,
+                 job_text: str = "") -> list[Check]:
     checks = []
     if pdf is not None:
         pages = page_count(pdf)
@@ -205,7 +206,9 @@ def check_letter(letter: LetterContent, prof: CVProfile, pdf: Optional[Path], st
         ok, d = band_touches_top(pdf, style["navy"])
         checks.append(Check("Header band touches top edge", ok, d))
     text = "\n".join(letter.paragraphs)
-    nums = [n for n in unknown_numbers(text, prof) if n not in ("20",)]   # "20 hours a week" is the stated default
+    # numbers from the job ad (e.g. "5 months", a start date) may be named in the letter; others must be on your CV
+    from_ad = numbers_in(job_text or "")
+    nums = [n for n in unknown_numbers(text, prof) if n not in ("20",) and n not in from_ad]   # "20 hours a week": the stated default
     checks.append(Check("Only numbers from your main CV", not nums, ", ".join(nums[:10])))
     dashes = text.count("—")
     checks.append(Check("At most one em dash", dashes <= 1, f"{dashes} em dashes" if dashes > 1 else ""))

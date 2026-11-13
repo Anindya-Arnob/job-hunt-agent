@@ -469,7 +469,12 @@ def letter_qa(state: BuildState) -> dict:
         pdf = to_pdf(d)
     except PdfUnavailable:
         pdf = None
-    checks = qa.check_letter(L, prof, pdf, style)
+    checks = qa.check_letter(L, prof, pdf, style, job_text=job.full_description or "")
+    bad = [c for c in checks if not c.passed]
+    n = state.get("letter_attempts", 1)
+    _emit(state, f"Cover letter attempt {n}: " + ("all checks passed" if not bad else
+          "; ".join(f"{c.name}" + (f" ({c.detail})" if c.detail else "") for c in bad)
+          + (" – rewriting" if n < 2 else " – saved, please check")))
     return {"qa_letter": [c.as_dict() for c in checks]}
 
 

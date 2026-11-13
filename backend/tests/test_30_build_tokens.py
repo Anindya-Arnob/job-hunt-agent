@@ -183,3 +183,17 @@ def test_a_reviewer_fix_that_breaks_a_check_does_not_start_more_rewrites(setup, 
     with db.session_scope() as s:
         doc = s.exec(select(m.Document).where(m.Document.job_id == setup["good"], m.Document.kind == "cv")).first()
     assert doc.qa_passed and "Kubernetes Operator SDK" not in str(doc.content)
+
+
+def test_letter_may_name_numbers_from_the_job_ad(setup):  # noqa: F811
+    """Seen on a real build: '5 Monate' and '4.000' from the ad made the letter fail and be written twice."""
+    from jobagent.cv import service as CVS
+    from jobagent.docs import qa
+    from jobagent.schemas import LetterContent
+    prof, _ = CVS.get_main()
+    L = LetterContent(recipient="MAHLE", subject="Bewerbung",
+                      paragraphs=["Das Praktikum über 5 Monate bei einem Team von 4.000 Menschen passt zu mir.",
+                                  "Ich habe 37 Modelle gebaut.", "Mit freundlichen Grüßen"])
+    ad = "Praktikum für 5 Monate. Rund 4.000 Mitarbeitende weltweit."
+    nums = next(c for c in qa.check_letter(L, prof, None, {}, job_text=ad) if c.name.startswith("Only numbers"))
+    assert not nums.passed and nums.detail == "37"                  # from the ad: fine; invented: still caught
