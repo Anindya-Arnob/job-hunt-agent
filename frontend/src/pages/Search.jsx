@@ -7,6 +7,7 @@ import RunProgress from '../components/RunProgress'
 import SearchPlan from '../components/SearchPlan'
 import SuggestTags from '../components/SuggestTags'
 
+const SITE_NAME = { feeds: 'Job feeds', websearch: 'Other job sites' }
 const BLANK = { name: 'New profile', roles: [], keywords_in: [], keywords_out: [], job_types: ['Full-time'],
   locations: [], work_modes: ['Remote', 'Hybrid', 'On-site'], days: 7, sources: [], language_max: 'any', plan: {},
   exclude_companies: [], min_salary: 0, is_default: false }
@@ -151,7 +152,8 @@ export default function SearchPage() {
               <div className="max-h-80 overflow-y-auto rounded-md bg-slate-50 p-2 font-mono text-xs">
                 {runEvents.slice(-120).map((e, i) => (
                   <div key={i} className={e.level === 'warn' ? 'text-amber-700' : e.type === 'run_failed' ? 'text-rose-700' : ''}>
-                    <span className="text-slate-400">{fmtTime(e.ts)}</span> {e.message}</div>
+                    <span className="text-slate-400">{fmtTime(e.ts)}</span>{' '}
+                    {e.site && <span className="font-semibold">{SITE_NAME[e.site] || SOURCE_LABEL[e.site] || e.site}: </span>}{e.message}</div>
                 ))}
               </div>
               {done && <div className="flex justify-between"><StatusBadge status={runEvents.some((e) => e.type === 'run_failed') ? 'failed' : 'done'} />

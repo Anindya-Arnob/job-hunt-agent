@@ -66,7 +66,8 @@ export default function Runs() {
                     <div className="max-h-56 overflow-y-auto text-xs">{detail.searches.filter((s) => !['ok', 'split'].includes(s.status)).map((s) => (
                       <div key={s.id} className="border-b border-slate-100 py-1">{SOURCE_LABEL[s.site] || s.site} · “{s.query}” {s.location && `in ${s.location}`} · <b>{s.status.replace('_', ' ')}</b> {s.error && <span className="muted">{s.error.slice(0, 120)}</span>}</div>))}</div></div>)}
                 <div><span className="label">Log</span>
-                  <div className="max-h-60 overflow-y-auto rounded-md bg-slate-50 p-2 font-mono text-xs">{detail.events.map((e, i) => <div key={i}><span className="text-slate-400">{fmtTime(e.ts)}</span> {e.message}</div>)}
+                  <div className="max-h-60 overflow-y-auto rounded-md bg-slate-50 p-2 font-mono text-xs">{detail.events.map((e, i) => <div key={i}><span className="text-slate-400">{fmtTime(e.ts)}</span>{' '}
+                    {e.site && <span className="font-semibold">{({ feeds: 'Job feeds', websearch: 'Other job sites' })[e.site] || SOURCE_LABEL[e.site] || e.site}: </span>}{e.message}</div>)}
                     {!detail.events.length && <span className="muted">Log is kept while the app is open.</span>}</div></div>
               </div>
             </div>)}
