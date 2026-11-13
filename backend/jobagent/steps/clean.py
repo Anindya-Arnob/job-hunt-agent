@@ -137,6 +137,8 @@ def ingest(raw_jobs: list[RawJob], run_id: Optional[int], fp: m.FilterProfile) -
     counts = {"found": len(raw_jobs), "new": 0, "duplicates": 0, "excluded": 0, "no_description": 0,
               "previously_deleted": 0}
     new_ids: list[int] = []
+    from .dupes import DupIndex
+    index = None                       # near duplicates (other spelling, place missing, German/English title)
     with db.session_scope() as s:
         dead_urls, dead_keys = _tombstones(s)
         for rj in raw_jobs:
@@ -148,6 +150,10 @@ def ingest(raw_jobs: list[RawJob], run_id: Optional[int], fp: m.FilterProfile) -
                 counts["previously_deleted"] += 1
                 continue
             existing = _find_existing(s, url_key, dkey)
+            if not existing:
+                index = index or DupIndex(s)
+                jid = index.find(rj.company, rj.title, rj.location)
+                existing = s.get(m.Job, jid) if jid else None
             if existing:
                 counts["duplicates"] += 1
                 if rj.source not in existing.sources:
@@ -158,6 +164,8 @@ def ingest(raw_jobs: list[RawJob], run_id: Optional[int], fp: m.FilterProfile) -
                     existing.full_description = rj.description
                 if not existing.company and rj.company:
                     existing.company = rj.company.strip()
+                if not existing.location and rj.location:
+                    existing.location = rj.location.strip()
                 existing.last_seen_run = run_id
                 s.add(existing)
                 continue
@@ -174,6 +182,8 @@ def ingest(raw_jobs: list[RawJob], run_id: Optional[int], fp: m.FilterProfile) -
                 job.notes = "Description incomplete (could not be retrieved)"
             s.add(job)
             s.flush()
+            if index:
+                index.add(job.id, job.company, job.title, job.location)
             if reason:
                 counts["excluded"] += 1
             else:

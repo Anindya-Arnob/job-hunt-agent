@@ -57,6 +57,13 @@ async def lifespan(_app):
         hide_junk_jobs()
     except Exception as e:  # never block the start
         logging.getLogger(__name__).warning("junk cleanup: %s", e)
+    try:
+        from ..steps.dupes import merge_existing
+        n = merge_existing()
+        if n:
+            log.info("hid %d duplicate job(s)", n)
+    except Exception as e:
+        log.warning("duplicate cleanup: %s", e)
     scheduler.start()
     from ..sync_docs import sync_all
     asyncio.get_running_loop().run_in_executor(None, sync_all)   # match CV files on disk in the background
