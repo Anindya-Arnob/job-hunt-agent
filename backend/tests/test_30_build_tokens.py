@@ -262,3 +262,19 @@ def test_availability_goes_in_the_letter_never_in_the_cv(setup, monkeypatch):  #
         cv = s.exec(select(m.Document).where(m.Document.job_id == setup["good"], m.Document.kind == "cv")).first()
     assert "6-month" not in cv.content["summary"] and "States your availability" not in str(cv.qa_results)
     assert out["run_id"]
+
+
+def test_your_personal_claude_md_stays_out_of_the_apps_calls(tmp_path, monkeypatch):
+    import os
+    from jobagent import claude_code
+    from jobagent.config import settings
+    from test_23_cv_options import HELP
+    monkeypatch.setattr(claude_code, "help_text", lambda e=None: HELP)
+    monkeypatch.setattr(claude_code, "installed_plugins", lambda: {})
+    monkeypatch.delenv("CLAUDE_CODE_DISABLE_CLAUDE_MDS", raising=False)
+    monkeypatch.setattr(settings, "claude_lean", True)
+    claude_code.flags(tmp_path, system="S")
+    assert os.environ.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1"
+    monkeypatch.setattr(settings, "claude_lean", False)              # lean off: everything of yours loads
+    claude_code.flags(tmp_path, system="S")
+    assert "CLAUDE_CODE_DISABLE_CLAUDE_MDS" not in os.environ

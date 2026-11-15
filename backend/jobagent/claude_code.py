@@ -132,6 +132,12 @@ def flags(workdir: Path, *, system: Optional[str] = None, no_tools: bool = True,
     out: list[str] = []
     used_system = False
     lean = settings.claude_lean
+    # lean: your personal CLAUDE.md (e.g. coding rules you load in every Claude Code session) stays out of the
+    # app's calls; it would cost tokens and change how CVs are written. Child processes inherit this.
+    if lean:
+        os.environ["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "1"
+    else:
+        os.environ.pop("CLAUDE_CODE_DISABLE_CLAUDE_MDS", None)
     plugins = installed_plugins()
     if lean:
         if system is not None and has("--system-prompt-file"):
