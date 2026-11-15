@@ -170,8 +170,8 @@ def test_a_reviewer_fix_that_breaks_a_check_does_not_start_more_rewrites(setup, 
     def writer(*a, **kw):
         calls.append(1)
         cv = real(*a, **kw)
-        if len(calls) > 1:                  # the version after the review names a tool the main CV does not have
-            cv.skills[0].items.append("Kubernetes Operator SDK")
+        if len(calls) > 1:                  # the version after the review makes up a number
+            cv.summary += " Cut costs by 97%."
         return cv
     monkeypatch.setattr(W, "write_cv", writer)
     monkeypatch.setattr(W, "review_cv", lambda *a, **k: ReviewResult(verdict="maybe", reason="ok",
@@ -182,7 +182,7 @@ def test_a_reviewer_fix_that_breaks_a_check_does_not_start_more_rewrites(setup, 
     assert any("keeping the version that passed every check" in mm for mm in msgs)
     with db.session_scope() as s:
         doc = s.exec(select(m.Document).where(m.Document.job_id == setup["good"], m.Document.kind == "cv")).first()
-    assert doc.qa_passed and "Kubernetes Operator SDK" not in str(doc.content)
+    assert doc.qa_passed and "97%" not in str(doc.content)
 
 
 def test_letter_may_name_numbers_from_the_job_ad(setup):  # noqa: F811
@@ -278,3 +278,40 @@ def test_your_personal_claude_md_stays_out_of_the_apps_calls(tmp_path, monkeypat
     monkeypatch.setattr(settings, "claude_lean", False)              # lean off: everything of yours loads
     claude_code.flags(tmp_path, system="S")
     assert "CLAUDE_CODE_DISABLE_CLAUDE_MDS" not in os.environ
+
+
+def test_unknown_tools_and_lost_keywords_are_fixed_without_a_rewrite():
+    """These two checks used to send the CV back to Claude (a whole new CV of tokens) up to 3 times per job."""
+    from jobagent.schemas import JobForWriting
+    from profile_fixture import sample_profile
+    prof = sample_profile()
+    cv = CVContent(tagline="t", summary="s", skills=[{"category": "Programming & Databases", "items": ["Python", "Kubernetes"]}],
+                   experience=[{"title": "Intern", "stack": ["Python", "Snowflake"], "bullets": ["Built things"]}],
+                   projects=[{"name": "P", "bullets": ["b"]}], education=[{"degree": "M.Sc."}])
+    jw = JobForWriting(company="X", title="ML Engineer", keywords=["SQL", "Python"])
+    done = B._repair(cv, prof, jw, {"matched": ["SQL", "Python"]})
+    assert "Kubernetes" not in cv.skills[0].items and cv.experience[0].stack == ["Python"]
+    assert "SQL" in cv.skills[0].items and len(done) == 2
+
+
+def test_quick_rule_goes_with_low_effort(monkeypatch):
+    """Low effort also asks Claude to answer in one pass: measured 3.6-4.9k output tokens -> 1.3k per CV."""
+    from jobagent import llm
+    from jobagent.config import settings
+    from jobagent.schemas import CheckResult
+    seen = {}
+    from jobagent import claude_code
+    monkeypatch.setattr(claude_code, "exe", lambda: "claude")
+
+    def fake_run(cmd, prompt, cwd, timeout=420):
+        seen["all"] = " ".join(cmd) + prompt
+        raise llm.LLMUnavailable("x")
+    monkeypatch.setattr(llm, "_run_claude", fake_run)
+    monkeypatch.setattr(settings, "cv_effort", "low")
+    with pytest.raises(llm.LLMUnavailable):
+        llm._cli_structured("write_cv", CheckResult, "SYSTEM", "USER")
+    assert "SPEED RULE" in seen["all"]
+    monkeypatch.setattr(settings, "cv_effort", "medium")
+    with pytest.raises(llm.LLMUnavailable):
+        llm._cli_structured("write_cv", CheckResult, "SYSTEM", "USER")
+    assert "SPEED RULE" not in seen["all"]

@@ -104,14 +104,14 @@ def test_failed_checks_retry_then_flag(setup, monkeypatch):
     def bad_writer(job, prof, issues=None, level=0, **kw):
         calls["n"] += 1
         cv = real(job, prof, issues, level, **kw)
-        cv.skills[0].items.append("Kubernetes")     # a tool you don't have
+        cv.summary += " Cut costs by 97%."         # a number your main CV does not have (tools are fixed in code now)
         return cv
     monkeypatch.setattr(W, "write_cv", bad_writer)
     out = asyncio.run(B.start_build([ids["good"]]))
     r = out["results"][0]
     assert calls["n"] == settings.max_build_attempts
     assert r["status"] == "built - needs your attention"
-    assert any("Only tools" in f and "Kubernetes" in f for f in r["failed_checks"])
+    assert any("Only numbers" in f and "97" in f for f in r["failed_checks"])
 
 
 def test_second_build_starts_at_the_length_that_fitted(setup):

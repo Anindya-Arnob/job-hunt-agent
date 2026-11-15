@@ -195,6 +195,9 @@ def _chat(model: str, max_tokens: int):
     return _client_cache[key]
 
 
+QUICK_RULE = ("SPEED RULE: write the JSON answer straight away. Do not plan, draft or check it in your head first; "
+              "one pass is enough.\n\n")
+
 CLI_NODES = {"write_cv", "write_letter", "review_cv", "read_mail", "mail_jobs"}      # written by Claude Code when there is no API key
 
 
@@ -213,6 +216,8 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
     # without a level Claude decides itself and thought for 12,000-17,000 tokens per CV (minutes each);
     # a rule-bound rewrite does not need that: low unless you chose more in Build options
     effort = (settings.cv_effort or "low") if node in ("write_cv", "write_letter", "review_cv") else ""
+    if effort == "low":           # measured: thinking 4-5k tokens -> 0, same answer length, 4x faster
+        tail = QUICK_RULE + tail
     last, fix = None, ""
     for attempt in range(2):
         with tempfile.TemporaryDirectory() as cwd:

@@ -28,7 +28,8 @@ TITLE_STOP = {
     "senior", "m", "w", "d", "f", "x", "in", "und", "and", "the", "of", "for", "im", "mit", "bereich", "als", "a",
     "an", "to", "with", "or", "oder", "all", "genders", "remote", "hybrid", "berlin", "hamburg", "munich", "münchen",
     "part", "time", "teilzeit", "job", "position", "stelle", "thesis", "abschlussarbeit", "masterarbeit", "duales",
-    "studium", "trainee", "–", "-", "&", "/",
+    "studium", "trainee", "–", "-", "&", "/", "bachelorarbeit", "bachelor", "master", "von", "für", "zur", "zum",
+    "der", "die", "das", "project", "based", "internal",
 }
 WEAK_START = re.compile(r"^(responsible for|worked on|helped|assisted|participated in|involved in|tasked with|"
                         r"duties included|was part of)\b", re.I)
@@ -198,8 +199,10 @@ def screen_checks(job: JobForWriting, c: CVContent, prof: CVProfile, truth: CVPr
     tw = title_words(job.title)
     t_hit = [w for w in tw if term_regex(w).search(head)]
     ok = not tw or len(t_hit) >= max(1, (len(tw) + 1) // 2)
+    # a long title (often German for an English CV) cannot be put in a headline word by word: shown, no rewrite
     out.append(Check("Job title in your headline", ok,
-                     "" if ok else f"add the posting's words to the tagline or summary: {', '.join(w for w in tw if w not in t_hit)}"))
+                     "" if ok else f"add the posting's words to the tagline or summary: {', '.join(w for w in tw if w not in t_hit)}",
+                     soft=len(tw) > 4))
     fp = [m.group(0) for s in [c.summary] + bullets(c) for m in FIRST_PERSON.finditer(s)]
     out.append(Check("No 'I' or 'my' in the CV", not fp, f"found: {', '.join(sorted(set(fp)))}" if fp else ""))
     weak = [b for b in bullets(c) if WEAK_START.search(b.strip())]

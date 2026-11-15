@@ -339,6 +339,30 @@ def _trim_once(cv: CVContent, kw: dict, n: int, min_projects: int) -> int:
     return cuts
 
 
+def _repair(cv: CVContent, prof: CVProfile, jw: JobForWriting, before: Optional[dict]) -> list[str]:
+    """Fix in code what two checks would otherwise send back to Claude for a whole rewrite (each one a full CV
+    of tokens): drop tools your main CV does not show, put back keywords your main CV had."""
+    from ..docs import ats
+    done = []
+    bad = set(qa.unknown_tools(cv, prof))
+    if bad:
+        for g in cv.skills:
+            g.items = [i for i in g.items if i not in bad]
+        for it in [*cv.experience, *cv.projects]:
+            it.stack = [i for i in it.stack if i not in bad]
+        cv.skills = [g for g in cv.skills if g.items]
+        done.append("removed tools your main CV does not show: " + ", ".join(sorted(bad)))
+    matched = set(ats.score(jw, cv, prof)["matched"])
+    lost = [t for t in (before or {}).get("matched", []) if t not in matched]
+    if lost and cv.skills:
+        for t in lost:   # into the group that holds it in your main CV, else the last group
+            cat = next((pg.category for pg in prof.skills if any(ats.hit(t, i) for i in [pg.category, *pg.items])), "")
+            g = next((g for g in cv.skills if g.category == cat), cv.skills[-1])
+            g.items.append(t)
+        done.append("put back keywords from your main CV: " + ", ".join(lost))
+    return done
+
+
 def render_qa(state: BuildState) -> dict:
     from ..docs import ats
     prof = _truth(state)
@@ -347,6 +371,9 @@ def render_qa(state: BuildState) -> dict:
     wanted = (state.get("proj_info") or {}).get("want") or 3
     style = cvs.active_style()
     cv = CVContent.model_validate(state["cv"])
+    fixed = _repair(cv, prof, jw, state.get("ats_before"))
+    if fixed:
+        _emit(state, "Fixed without a rewrite: " + "; ".join(fixed)[:200])
     tmp = Path(state["tmp_dir"]) / f"job{state['current']}"
     tmp.mkdir(parents=True, exist_ok=True)
     checks = []

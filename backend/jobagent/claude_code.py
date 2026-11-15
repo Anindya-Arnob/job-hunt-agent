@@ -140,10 +140,15 @@ def flags(workdir: Path, *, system: Optional[str] = None, no_tools: bool = True,
         os.environ.pop("CLAUDE_CODE_DISABLE_CLAUDE_MDS", None)
     plugins = installed_plugins()
     if lean:
-        if system is not None and has("--system-prompt-file"):
+        # replacing Claude Code's own long system prompt saves its tokens on every call; newer versions list the
+        # file option only as "--system-prompt[-file]" in --help, older ones not at all (then the text goes inline)
+        if system is not None and (has("--system-prompt-file") or "--system-prompt[-file]" in help_text()):
             p = workdir / "_system.md"
             p.write_text(system, encoding="utf-8")
             out += ["--system-prompt-file", str(p)]
+            used_system = True
+        elif system is not None and has("--system-prompt") and len(system) < 20000 and len(prefix(exe() or "")) == 1:
+            out += ["--system-prompt", system]
             used_system = True
         for f in ("--disable-slash-commands", "--strict-mcp-config", "--no-session-persistence"):
             if has(f):
@@ -158,7 +163,7 @@ def flags(workdir: Path, *, system: Optional[str] = None, no_tools: bool = True,
         p = workdir / "_settings.json"
         p.write_text(json.dumps({"enabledPlugins": wanted}), encoding="utf-8")
         out += ["--settings", str(p)]
-    if no_tools:
+    if no_tools:      # (not `--tools ""`: measured, it doubled the input tokens)
         out += ["--disallowedTools", NO_TOOLS + (",*" if lean else "")]
     if model:
         out += ["--model", model]
