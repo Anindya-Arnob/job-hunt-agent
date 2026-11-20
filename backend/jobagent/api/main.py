@@ -7,6 +7,7 @@ import json
 import logging
 import shutil
 import tempfile
+import threading
 from datetime import date, datetime, timedelta, timezone
 import re
 from pathlib import Path
@@ -1392,6 +1393,34 @@ def cv_list():
 
 
 # (before /api/cv/{pid}, which would take 'photo' as a CV id)
+@app.get("/api/cv/templates")
+def cv_templates():
+    from ..docs import templates as T
+    return {"templates": T.public(), "active": T.get(settings.cv_template)["id"]}
+
+
+@app.get("/api/cv/templates/{tid}/preview.png")
+async def cv_template_preview(tid: str):
+    from ..docs import templates as T
+    if tid not in T.BY_ID:
+        raise HTTPException(404, "No such template")
+    try:
+        png = await asyncio.to_thread(_template_preview_locked, tid)
+    except cvs.CVError as e:
+        _err(e, 404)
+    except PdfUnavailable as e:
+        _err(e, 503)
+    return FileResponse(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+_TPL_LOCK = threading.Lock()
+
+
+def _template_preview_locked(tid: str):
+    with _TPL_LOCK:              # one LibreOffice render at a time: ten previews arrive together
+        return cvs.template_preview(tid)
+
+
 @app.post("/api/cv/photo")
 async def cv_photo_upload(file: UploadFile = File(...)):
     with tempfile.TemporaryDirectory() as td:

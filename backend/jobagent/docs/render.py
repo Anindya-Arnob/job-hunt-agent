@@ -191,16 +191,52 @@ def tidy_name(text: str) -> str:
     return re.sub(r"\s+—\s+", " – ", text or "").strip()
 
 
+def _left_border(paragraph, hex_: str, size: int = 24) -> None:
+    pPr = paragraph._p.get_or_add_pPr()
+    bdr = OxmlElement("w:pBdr")
+    b = OxmlElement("w:left")
+    b.set(qn("w:val"), "single")
+    b.set(qn("w:sz"), str(size))
+    b.set(qn("w:space"), "4")
+    b.set(qn("w:color"), hex_)
+    bdr.append(b)
+    pPr.append(bdr)
+
+
+def _letter_spacing(run, twentieths: int) -> None:
+    rpr = run._r.get_or_add_rPr()
+    sp = OxmlElement("w:spacing")
+    sp.set(qn("w:val"), str(twentieths))
+    rpr.append(sp)
+
+
+def _tiny(paragraph) -> None:
+    """The empty paragraph Word needs after a table in a cell: as small as possible."""
+    _spacing(paragraph, 0, 0, line=0.5)
+    rpr = paragraph._p.get_or_add_pPr()
+    r = OxmlElement("w:rPr")
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), "2")
+    r.append(sz)
+    rpr.append(r)
+
+
 class Builder:
+    """Draws one page in a template: where paragraphs go (the page, a column, a cell) is `box`, its width
+    `width`. Headings, items and the header follow the template's layout keys (docs/templates.py)."""
+
     def __init__(self, style: dict, compact: int = 0):
         self.st = style
         self.compact = compact            # 0 normal, 1-2 tighter spacing
+        self.side = style.get("side", SIDE)
+        self.top = style.get("top", 0)
+        self.text_w = PAGE_W - 2 * self.side
         self.doc = Document()
         sec = self.doc.sections[0]
         sec.orientation = WD_ORIENT.PORTRAIT
         sec.page_width, sec.page_height = Twips(PAGE_W), Twips(PAGE_H)
-        sec.top_margin, sec.bottom_margin = Twips(0), Twips(BOTTOM)
-        sec.left_margin = sec.right_margin = Twips(SIDE)
+        sec.top_margin, sec.bottom_margin = Twips(self.top), Twips(BOTTOM)
+        sec.left_margin = sec.right_margin = Twips(self.side)
         sec.header_distance, sec.footer_distance = Twips(0), Twips(0)
         normal = self.doc.styles["Normal"]
         normal.font.name = style["font"]
@@ -208,46 +244,134 @@ class Builder:
         normal.paragraph_format.space_after = Pt(0)
         normal.paragraph_format.space_before = Pt(0)
         _word2013_layout(self.doc)
-        # remove the default empty first paragraph so the band is the first element
+        # remove the default empty first paragraph so the header is the first element
         body = self.doc.element.body
         for p in list(body.iterchildren(qn("w:p"))):
             body.remove(p)
+        self._fresh: set[int] = set()     # cells whose one empty paragraph is still unused
+        self._keep: list = []
+        self.base(self.doc, self.text_w)
+
+    # ------------------------------------------------------------- where ---
+    # base = the column being written (the page, or a column of the sidebar layout); sec_box = where the
+    # current section's items go (the base, or the right cell of a label heading); box = the next paragraph's place
+    def use(self, box, width: int) -> None:
+        self.box, self.width = box, width
+
+    def base(self, box, width: int) -> None:
+        self._base, self._base_w = box, width
+        self.sec_box, self.sec_width = box, width
+        self.use(box, width)
+
+    def cell(self, c):
+        self._fresh.add(id(c))
+        self._keep.append(c)
+        return c
+
+    def item_start(self) -> None:
+        self.use(self.sec_box, self.sec_width)
+
+    def p(self, align=None, style: Optional[str] = None):
+        if id(self.box) in self._fresh:      # a new cell comes with one empty paragraph: use it
+            self._fresh.discard(id(self.box))
+            para = self.box.paragraphs[0]
+            if style:
+                para.style = self.doc.styles[style]
+        else:
+            para = self.box.add_paragraph(style=style) if style else self.box.add_paragraph()
+        if align is not None:
+            para.alignment = align
+        return para
+
+    def table(self, widths: list[int], indent: int = 0):
+        box = self.box
+        if id(box) in self._fresh:            # no blank line above a table in a cell
+            self._fresh.discard(id(box))
+            box._tc.remove(box.paragraphs[0]._p)
+        t = box.add_table(rows=1, cols=len(widths))
+        _tbl_props(t, sum(widths), widths, indent=indent)
+        if box is not self.doc:
+            _tiny(box.paragraphs[-1])
+        return t
 
     @property
     def body_pt(self):
         return self.st["body_pt"]
 
-    def p(self, align=None):
-        para = self.doc.add_paragraph()
-        if align is not None:
-            para.alignment = align
-        return para
+    # ------------------------------------------------------------ header ---
+    def header(self, prof: CVProfile, tagline: str, photo: Optional[Path] = None) -> None:
+        kind = self.st.get("header", "band")
+        if kind == "band":
+            return self.header_band(prof, tagline, photo)
+        center = kind == "center"
+        st, f = self.st, self.st["font"]
+        if photo:
+            t = self.table([self.text_w - PHOTO_W - 200, PHOTO_W + 200])
+            box, pc = t.rows[0].cells
+            _cell_margins(pc, left=200)
+            pp = pc.paragraphs[0]
+            pp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            pp.add_run().add_picture(str(photo), width=Twips(PHOTO_W))
+            self.use(self.cell(box), self.text_w - PHOTO_W - 200)
+        align = WD_ALIGN_PARAGRAPH.CENTER if center else WD_ALIGN_PARAGRAPH.LEFT
+        p = self.p(align)
+        _spacing(p, 0, 1)
+        _run(p, prof.name, st.get("name_pt", 20), st["navy"], bold=True, font=f)
+        if tagline:
+            p = self.p(align)
+            _spacing(p, 0, 2)
+            _run(p, tagline, self.body_pt + 1, st["tagline"], italic=center, font=f)
+        c = prof.contact
+        p = self.p(align)
+        _spacing(p, 0, 0)
+        first = True
+        for b in [x for x in (c.location, c.phone) if x]:
+            if not first:
+                _run(p, "  |  ", 8.5, st["muted"], font=f)
+            _run(p, b, 8.5, st["contact"], font=f)
+            first = False
+        if c.email:
+            if not first:
+                _run(p, "  |  ", 8.5, st["muted"], font=f)
+            _hyperlink(p, f"mailto:{c.email}", c.email, 8.5, st["link"], f, underline=False)
+            first = False
+        for lbl, url in (("LinkedIn", c.linkedin), ("GitHub", c.github)):
+            if url:
+                if not first:
+                    _run(p, "  |  ", 8.5, st["muted"], font=f)
+                _hyperlink(p, url, lbl, 8.5, st["link"], f, underline=False)
+                first = False
+        self.use(self.doc, self.text_w)
+        rule = self.p()
+        _spacing(rule, 0, 2)
+        _bottom_border(rule, st["teal"], 8 if kind != "center" else 4)
+        self.base(self.doc, self.text_w)
 
-    # ----------------------------------------------------------- blocks ---
     def header_band(self, prof: CVProfile, tagline: str, photo: Optional[Path] = None) -> None:
         st = self.st
         pad = 300 if self.compact == 0 else 220
+        band = st.get("band", st["navy"])
         # Same set-up as your Word-saved master CV: exactly the page width, pulled left by the side margin
         over = 0
         if photo:      # your photo on the right of the band, the text centred in the rest
-            pw = PHOTO_W + SIDE
+            pw = PHOTO_W + self.side
             t = self.doc.add_table(rows=1, cols=2)
-            _tbl_props(t, PAGE_W, [PAGE_W - pw, pw], indent=-SIDE)
+            _tbl_props(t, PAGE_W, [PAGE_W - pw, pw], indent=-self.side)
             cell, pc = t.rows[0].cells
             for c in (cell, pc):
-                _set_cell_shading(c, st["navy"])
-            _cell_margins(cell, top=pad, bottom=pad - 60, left=SIDE + PHOTO_W // 2, right=120)
-            _cell_margins(pc, top=pad - 120, bottom=pad - 160, left=0, right=SIDE)
+                _set_cell_shading(c, band)
+            _cell_margins(cell, top=pad, bottom=pad - 60, left=self.side + PHOTO_W // 2, right=120)
+            _cell_margins(pc, top=pad - 120, bottom=pad - 160, left=0, right=self.side)
             pp = pc.paragraphs[0]
             pp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             _spacing(pp, 0, 0)
             pp.add_run().add_picture(str(photo), width=Twips(PHOTO_W))
         else:
             t = self.doc.add_table(rows=1, cols=1)
-            _tbl_props(t, PAGE_W, [PAGE_W], indent=-SIDE)
+            _tbl_props(t, PAGE_W, [PAGE_W], indent=-self.side)
             cell = t.rows[0].cells[0]
-            _set_cell_shading(cell, st["navy"])
-            _cell_margins(cell, top=pad, bottom=pad - 60, left=SIDE + over, right=SIDE + over)
+            _set_cell_shading(cell, band)
+            _cell_margins(cell, top=pad, bottom=pad - 60, left=self.side + over, right=self.side + over)
         f = st["font"]
         p = cell.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -280,63 +404,119 @@ class Builder:
                     _run(p, "   |   ", 8.5, "7799AA", font=f)
                 _hyperlink(p, url, lbl, 8.5, st["link"], f)
 
-    def heading(self, text: str) -> None:
-        p = self.p()
-        before = 7 if self.compact == 0 else (5 if self.compact == 1 else 4)
-        _spacing(p, before, 2)
-        _bottom_border(p, self.st["teal"])
-        _run(p, text.upper(), self.st["heading_pt"], self.st["navy"], bold=True, font=self.st["font"])
+    # ---------------------------------------------------------- headings ---
+    LABEL_W = 2350
 
+    def heading(self, text: str) -> None:
+        st, f = self.st, self.st["font"]
+        kind = st.get("heading", "rule")
+        self.base(self._base, self._base_w)
+        before = 7 if self.compact == 0 else (5 if self.compact == 1 else 4)
+        if kind == "label":                              # section name in a left column, content on the right
+            t = self.table([self.LABEL_W, self.width - self.LABEL_W])
+            lc, rc = t.rows[0].cells
+            _cell_margins(lc, top=before * 20, right=120)
+            _cell_margins(rc, top=before * 20)
+            p = lc.paragraphs[0]
+            _run(p, text.upper(), st["heading_pt"], st["teal"] if st["teal"] != st["navy"] else st["navy"],
+                 bold=True, font=f)
+            self.sec_box, self.sec_width = self.cell(rc), self.width - self.LABEL_W
+            self.item_start()
+            return
+        p = self.p(WD_ALIGN_PARAGRAPH.CENTER if kind == "center_rule" else None)
+        if kind == "plain":
+            _spacing(p, before + 1, 2)
+            _run(p, text, st["heading_pt"], st["teal"], bold=True, font=f)
+        elif kind == "bar":
+            _spacing(p, before, 3)
+            _left_border(p, st["teal"], 24)
+            _run(p, text.upper(), st["heading_pt"], st["navy"], bold=True, font=f)
+        elif kind == "center_rule":
+            _spacing(p, before, 3)
+            _bottom_border(p, st["teal"], 4)
+            r = _run(p, text.upper(), st["heading_pt"], st["navy"], bold=True, font=f)
+            _letter_spacing(r, 30)
+        else:                                            # rule
+            _spacing(p, before, 2)
+            _bottom_border(p, st["teal"])
+            _run(p, text.upper(), st["heading_pt"], st["navy"], bold=True, font=f)
+
+    # ------------------------------------------------------------- items ---
     def text(self, text: str, color=None, italic=False, after=0) -> None:
+        self.item_start()
         p = self.p()
         _spacing(p, 0, after)
         _run(p, text, self.body_pt, color or self.st["text"], italic=italic, font=self.st["font"])
 
+    DATE_W = 1350
+
     def title_line(self, bold: str, italic: str = "", dates: str = "", link: tuple[str, str] | None = None,
                    note: str = "") -> None:
-        p = self.p()
-        _spacing(p, 2 if self.compact < 2 else 1, 0)
-        _right_tab(p)
-        f = self.st["font"]
-        _run(p, bold, self.body_pt + 0.5, self.st["text"], bold=True, font=f)
+        st, f = self.st, self.st["font"]
+        self.item_start()
+        column = st.get("dates") == "column" and self.sec_width > 6000
+        if column:                           # dates in a left column (tabular Lebenslauf)
+            t = self.table([self.DATE_W, self.sec_width - self.DATE_W])
+            dc, rc = t.rows[0].cells
+            _cell_margins(dc, top=40 if self.compact < 2 else 20, right=100)
+            _cell_margins(rc, top=40 if self.compact < 2 else 20)
+            dp = dc.paragraphs[0]
+            _run(dp, dates or "", self.body_pt, st["muted"], font=f)
+            self.use(self.cell(rc), self.sec_width - self.DATE_W)
+            p = self.p()
+        else:
+            p = self.p()
+            _spacing(p, 2 if self.compact < 2 else 1, 0)
+            p.paragraph_format.tab_stops.add_tab_stop(Twips(self.width), WD_TAB_ALIGNMENT.RIGHT)
+        _run(p, bold, self.body_pt + 0.5, st["text"], bold=True, font=f)
         if note:
-            _run(p, f" {note}", self.body_pt, self.st["muted"], font=f)
+            _run(p, f" {note}", self.body_pt, st["muted"], font=f)
         if italic:
-            _run(p, "  |  ", self.body_pt, self.st["muted"], font=f)
-            _run(p, italic, self.body_pt, self.st["org"], italic=True, font=f)
+            _run(p, "  |  ", self.body_pt, st["muted"], font=f)
+            _run(p, italic, self.body_pt, st["org"], italic=True, font=f)
         if link:
-            _run(p, "  |  ", self.body_pt, self.st["muted"], font=f)
-            _hyperlink(p, link[1], link[0], self.body_pt, "0563C1", f, italic=True)
-        if dates:
-            _run(p, "\t" + dates, self.body_pt, self.st["muted"], font=f)
+            _run(p, "  |  ", self.body_pt, st["muted"], font=f)
+            _hyperlink(p, link[1], link[0], self.body_pt, st.get("link_text", "0563C1"), f, italic=True)
+        if dates and not column:
+            _run(p, "\t" + dates, self.body_pt, st["muted"], font=f)
 
-    def stack(self, items: list[str]) -> None:
+    def stack(self, items: list[str], label: str = "Stack") -> None:
         if not items:
             return
         p = self.p()
         _spacing(p, 0, 0)
-        _run(p, "Stack: " + " · ".join(items), self.body_pt - 0.5, self.st["org"], italic=True, font=self.st["font"])
+        _run(p, f"{label}: " + " · ".join(items), self.body_pt - 0.5, self.st["org"], italic=True, font=self.st["font"])
 
     def bullets(self, items: list[str]) -> None:
         for b in items:
-            p = self.doc.add_paragraph(style="List Bullet")
+            p = self.p(style="List Bullet")
             pf = p.paragraph_format
             pf.left_indent, pf.first_line_indent = Twips(260), Twips(-180)
             _spacing(p, 0, 0)
             _run(p, b, self.body_pt, self.st["text"], font=self.st["font"])
 
     def skills_table(self, groups) -> None:
-        t = self.doc.add_table(rows=len(groups), cols=2)
-        first = 2050
-        _tbl_props(t, TEXT_W, [first, TEXT_W - first])
-        for row, g in zip(t.rows, groups):
+        self.item_start()
+        if self.width < 4500:                # a narrow column (sidebar): category, then its items
+            for g in groups:
+                p = self.p()
+                _spacing(p, 3, 0)
+                _run(p, g.category, self.body_pt, self.st["navy"], bold=True, font=self.st["font"])
+                p = self.p()
+                _run(p, " · ".join(g.items), self.body_pt, self.st["text"], font=self.st["font"])
+            return
+        first = min(2050, self.width * 3 // 10)
+        t = self.table([first, self.width - first])
+        for i, g in enumerate(groups):
+            row = t.rows[0] if i == 0 else t.add_row()
             for cell in row.cells:
                 _cell_margins(cell, top=10, bottom=10, left=0, right=60)
             a, b = row.cells
-            pa = a.paragraphs[0]
-            _run(pa, g.category, self.body_pt, self.st["navy"], bold=True, font=self.st["font"])
-            pb = b.paragraphs[0]
-            _run(pb, " · ".join(g.items), self.body_pt, self.st["text"], font=self.st["font"])
+            _run(a.paragraphs[0], g.category, self.body_pt, self.st["navy"], bold=True, font=self.st["font"])
+            _run(b.paragraphs[0], " · ".join(g.items), self.body_pt, self.st["text"], font=self.st["font"])
+        for row in t.rows:          # widths of rows added later
+            for cell, cw in zip(row.cells, [first, self.width - first]):
+                cell.width = Twips(cw)
 
     def save(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -348,10 +528,10 @@ class Builder:
 HEADINGS = {
     "en": {"summary": "Professional Summary", "skills": "Technical Skills", "experience": "Experience",
            "projects": "Projects", "education": "Education", "certifications": "Certifications",
-           "languages": "Languages", "certificate": "Certificate"},
+           "languages": "Languages", "certificate": "Certificate", "contact": "Contact", "stack": "Stack"},
     "de": {"summary": "Profil", "skills": "Kenntnisse", "experience": "Berufserfahrung", "projects": "Projekte",
            "education": "Ausbildung", "certifications": "Zertifikate", "languages": "Sprachen",
-           "certificate": "Zertifikat"},
+           "certificate": "Zertifikat", "contact": "Kontakt", "stack": "Tools"},
 }
 MONTHS_DE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
              "November", "Dezember"]
@@ -361,77 +541,148 @@ def letter_date(d: date, lang: str = "en") -> str:
     return f"{d.day}. {MONTHS_DE[d.month - 1]} {d.year}" if lang == "de" else d.strftime("%d %B %Y")
 
 
+def _section(b: Builder, key: str, content: CVContent, H: dict) -> None:
+    c = content
+    if key == "summary" and c.summary:
+        b.heading(H["summary"])
+        b.text(c.summary)
+    elif key == "skills" and c.skills:
+        b.heading(H["skills"])
+        b.skills_table(c.skills)
+    elif key == "experience" and c.experience:
+        b.heading(H["experience"])
+        for e in c.experience:
+            org = " · ".join(x for x in (tidy(e.org), tidy(e.meta)) if x)
+            b.title_line(e.title, org, e.dates)
+            b.stack(e.stack, H["stack"])
+            b.bullets(e.bullets)
+    elif key == "projects" and c.projects:
+        b.heading(H["projects"])
+        for pr in c.projects:
+            b.title_line(tidy_name(pr.name), "", pr.dates, link=("GitHub", pr.link) if pr.link else None, note=pr.note)
+            b.stack(pr.stack, H["stack"])
+            b.bullets(pr.bullets)
+    elif key == "education" and c.education:
+        b.heading(H["education"])
+        for ed in c.education:
+            b.title_line(tidy_name(ed.degree), tidy(ed.school), ed.dates)
+            b.bullets(ed.bullets)
+    elif key == "certifications" and c.certifications:
+        b.heading(H["certifications"])
+        for ct in c.certifications:
+            b.title_line(" – ".join(x for x in (ct.name, ct.issuer.split("|")[0].strip()) if x), "", ct.dates,
+                         link=(H["certificate"], ct.link) if ct.link else None)
+            b.bullets(ct.bullets)
+    elif key == "languages" and c.languages:
+        b.heading(H["languages"])
+        if b.sec_width < 4500:
+            for lang in c.languages:
+                b.text(f"{lang.language}: {lang.level}")
+        else:
+            b.text("   |   ".join(f"{lang.language}: {lang.level}" for lang in c.languages))
+
+
+def _sidebar_cv(b: Builder, content: CVContent, prof: CVProfile, H: dict, photo: Optional[Path]) -> None:
+    """Shaded side column (photo, contact, skills, languages, certificates) and the main column."""
+    st, f = b.st, b.st["font"]
+    sw = st.get("sidebar_w", 3300)
+    t = b.doc.add_table(rows=1, cols=2)
+    _tbl_props(t, PAGE_W, [sw, PAGE_W - sw])
+    side, main = t.rows[0].cells
+    _set_cell_shading(side, st.get("sidebar_bg", "EEF2F7"))
+    trPr = t.rows[0]._tr.get_or_add_trPr()            # the shaded column runs down the whole page
+    h = OxmlElement("w:trHeight")
+    h.set(qn("w:val"), str(PAGE_H - BOTTOM - 40))
+    h.set(qn("w:hRule"), "atLeast")
+    trPr.append(h)
+    pad = 520 if b.compact == 0 else 400
+    _cell_margins(side, top=pad, bottom=200, left=420, right=320)
+    _cell_margins(main, top=pad, bottom=200, left=420, right=560)
+    # --- side column
+    b.base(b.cell(side), sw - 740)
+    if photo:
+        p = b.p(WD_ALIGN_PARAGRAPH.CENTER)
+        _spacing(p, 0, 6)
+        p.add_run().add_picture(str(photo), width=Twips(1500))
+    b.heading(H["contact"])
+    cn = prof.contact
+    for x in (cn.location, cn.phone):
+        if x:
+            b.text(x)
+    for lbl, url in ((cn.email, f"mailto:{cn.email}" if cn.email else ""), ("LinkedIn", cn.linkedin),
+                     ("GitHub", cn.github)):
+        if url:
+            p = b.p()
+            _hyperlink(p, url, lbl, b.body_pt, st["link"], f, underline=False)
+    for key in ("skills", "languages", "certifications"):
+        _section(b, key, content, H)
+    # --- main column
+    b.base(b.cell(main), PAGE_W - sw - 980)
+    p = b.p()
+    _spacing(p, 0, 1)
+    _run(p, prof.name, st.get("name_pt", 20), st["navy"], bold=True, font=f)
+    if content.tagline:
+        p = b.p()
+        _spacing(p, 0, 2)
+        _run(p, content.tagline, b.body_pt + 1, st["tagline"], font=f)
+    for key in ("summary", "experience", "projects", "education"):
+        _section(b, key, content, H)
+
+
 def render_cv(content: CVContent, prof: CVProfile, style: dict, path: Path, compact: int = 0,
               photo: Optional[Path] | str = "auto") -> Path:
-    """photo: 'auto' = your setting on My CV (Automatic: German CVs only / Always / Never), or a file, or None."""
+    """photo: 'auto' = your setting on My CV (Automatic: German CVs only / Always / Never), or a file, or None.
+    Templates without a photo area never show one."""
     if photo == "auto":
         from ..cv.service import photo_for
         photo = photo_for(content.lang)
+    if not style.get("photo_area", True):
+        photo = None
     b = Builder(style, compact)
     H = HEADINGS.get(content.lang, HEADINGS["en"])
-    b.header_band(prof, content.tagline, photo)
-    b.heading(H["summary"])
-    b.text(content.summary)
-    b.heading(H["skills"])
-    b.skills_table(content.skills)
-    if content.experience:
-        b.heading(H["experience"])
-        for e in content.experience:
-            org = " · ".join(x for x in (tidy(e.org), tidy(e.meta)) if x)
-            b.title_line(e.title, org, e.dates)
-            b.stack(e.stack)
-            b.bullets(e.bullets)
-    b.heading(H["projects"])
-    for pr in content.projects:
-        b.title_line(tidy_name(pr.name), "", pr.dates, link=("GitHub", pr.link) if pr.link else None, note=pr.note)
-        b.stack(pr.stack)
-        b.bullets(pr.bullets)
-    b.heading(H["education"])
-    for ed in content.education:
-        b.title_line(tidy_name(ed.degree), tidy(ed.school), ed.dates)
-        b.bullets(ed.bullets)
-    if content.certifications:
-        b.heading(H["certifications"])
-        for c in content.certifications:
-            b.title_line(" – ".join(x for x in (c.name, c.issuer.split("|")[0].strip()) if x), "", c.dates,
-                         link=(H["certificate"], c.link) if c.link else None)
-            b.bullets(c.bullets)
-    if content.languages:
-        b.heading(H["languages"])
-        b.text("   |   ".join(f"{l.language}: {l.level}" for l in content.languages))
+    if style.get("header") == "sidebar":
+        _sidebar_cv(b, content, prof, H, photo)
+        return b.save(path)
+    b.header(prof, content.tagline, photo)
+    for key in style.get("order") or ["summary", "skills", "experience", "projects", "education",
+                                      "certifications", "languages"]:
+        _section(b, key, content, H)
     return b.save(path)
 
 
 # --------------------------------------------------------------- letter ---
 def render_letter(letter: LetterContent, prof: CVProfile, tagline: str, style: dict, path: Path,
                   company: str = "", today: Optional[date] = None) -> Path:
-    b = Builder(style)
+    st = dict(style)
+    if st.get("header") == "sidebar":             # a letter is one column: the same colours, a plain header
+        st.update(header="left", side=SIDE, top=560)
+    b = Builder(st)
     size = 10
-    b.header_band(prof, tagline)
-    f = style["font"]
+    b.header(prof, tagline)
+    f = st["font"]
     p = b.p(WD_ALIGN_PARAGRAPH.RIGHT)
     _spacing(p, 16, 10)
     _run(p, f"{prof.contact.location}, {letter_date(today or date.today(), letter.lang)}".strip(", "), size,
-         style["muted"], font=f)
+         st["muted"], font=f)
     if letter.recipient or company:
         p = b.p()
         _spacing(p, 0, 8)
         _run(p, letter.recipient or (f"Personalabteilung, {company}" if letter.lang == "de" else f"Hiring Team, {company}"),
-             size, style["text"], font=f)
+             size, st["text"], font=f)
     p = b.p()
     _spacing(p, 0, 10)
-    _run(p, letter.subject, size + 0.5, style["navy"], bold=True, font=f)
+    _run(p, letter.subject, size + 0.5, st["navy"], bold=True, font=f)
     p = b.p()
     _spacing(p, 0, 8)
-    _run(p, letter.greeting, size, style["text"], font=f)
+    _run(p, letter.greeting, size, st["text"], font=f)
     for para in letter.paragraphs:
         p = b.p()
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         _spacing(p, 0, 8, line=1.08)
-        _run(p, para, size, style["text"], font=f)
+        _run(p, para, size, st["text"], font=f)
     p = b.p()
     _spacing(p, 6, 2)
-    _run(p, letter.closing, size, style["text"], font=f)
+    _run(p, letter.closing, size, st["text"], font=f)
     p = b.p()
-    _run(p, prof.name, size, style["navy"], bold=True, font=f)
+    _run(p, prof.name, size, st["navy"], bold=True, font=f)
     return b.save(path)

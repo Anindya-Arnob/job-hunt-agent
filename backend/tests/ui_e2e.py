@@ -49,6 +49,22 @@ with sync_playwright() as p:
     expect(page.get_by_text("Saved", exact=True)).to_be_visible()
     page.get_by_label("Automatic: German CVs only").check()
     shot(page, "03b_cv_photo")
+    # templates: your CV in each one, switch in one click
+    tpl = page.get_by_test_id("tpl-lebenslauf")
+    tpl.scroll_into_view_if_needed()
+    expect(tpl.get_by_alt_text("Lebenslauf (tabular) preview")).to_be_visible(timeout=120000)
+    page.wait_for_function("() => [...document.querySelectorAll('[data-testid=templates] img')].filter(i => i.complete && i.naturalWidth > 0).length >= 10", timeout=180000)
+    tpl.get_by_role("button", name="Use this template").click()
+    expect(page.get_by_text("is now used for every CV")).to_be_visible()
+    expect(tpl.get_by_text("In use").first).to_be_visible()
+    page.get_by_test_id("templates").scroll_into_view_if_needed()
+    shot(page, "03c_templates")
+    tpl.get_by_role("button", name="See it bigger").click()
+    expect(page.get_by_alt_text("Lebenslauf (tabular) large preview")).to_be_visible()
+    shot(page, "03d_template_big")
+    page.get_by_role("button", name="Close").click()
+    page.get_by_test_id("tpl-classic").get_by_role("button", name="Use this template").click()
+    expect(page.get_by_test_id("tpl-classic").get_by_text("In use").first).to_be_visible()
 
     # 3 edit -> live preview -> save version
     page.get_by_role("button", name="Edit").first.click()

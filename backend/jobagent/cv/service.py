@@ -384,12 +384,44 @@ def photo_for(lang: str) -> Optional[Path]:
     return p if mode == "always" or lang == "de" else None
 
 
-def active_style() -> dict:
+def active_style(template: str = "") -> dict:
     with db.session_scope() as s:
         t = s.exec(select(m.Template).where(m.Template.is_active == True)).first()  # noqa: E712
-        style = dict(DEFAULT_STYLE)
+        own = dict(DEFAULT_STYLE)
         if t:
-            style.update(t.style or {})
-        # Your prompt fixes these sizes regardless of the template file
-        style["heading_pt"], style["body_pt"] = 10, 9
-        return style
+            own.update(t.style or {})
+    # the template you chose on My CV (Classic Band uses the colours of the file you uploaded)
+    from ..docs.templates import style_for
+    return style_for(template or settings.cv_template, own)
+
+
+# --------------------------------------------------------------- templates ---
+def template_preview(tid: str) -> Path:
+    """Page 1 of your main CV in a template, as a PNG (cached until the CV, photo or colours change)."""
+    import hashlib
+    import json
+    from ..docs import templates as T
+    from ..docs.pdf import to_pdf
+    from ..docs.qa import render_page_png
+    from ..docs.render import render_cv
+    from ..schemas import CVContent
+    got = get_main()
+    if not got:
+        raise CVError("Upload your main CV first")
+    prof, vid = got
+    style = active_style(T.get(tid)["id"])
+    ph = photo_path()
+    photo = ph if ph.exists() and (settings.cv_photo or "auto") != "never" else None
+    key = hashlib.sha1(json.dumps([tid, vid, style, ph.stat().st_mtime if photo else 0], sort_keys=True,
+                                  default=str).encode()).hexdigest()[:12]
+    folder = Path(settings.data_dir) / "preview" / "templates"
+    pdf = folder / f"{tid}_{key}.pdf"
+    if not pdf.exists():
+        folder.mkdir(parents=True, exist_ok=True)
+        for old in folder.glob(f"{tid}_*"):
+            old.unlink(missing_ok=True)
+        c = CVContent(tagline=prof.tagline, summary=prof.summary, skills=prof.skills, experience=prof.experience,
+                      projects=prof.projects or [], education=prof.education, certifications=prof.certifications,
+                      languages=prof.languages)
+        to_pdf(render_cv(c, prof, style, folder / f"{tid}_{key}.docx", photo=photo))
+    return render_page_png(pdf, 0, 1.0, folder / "png")

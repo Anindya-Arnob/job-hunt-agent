@@ -190,8 +190,9 @@ def check_cv(content: CVContent, prof: CVProfile, docx: Path, pdf: Optional[Path
         pages = page_count(pdf)
         detail = "" if pages == 1 else f"{pages} pages, about {overflow_lines(pdf)} lines too long"
         checks.append(Check("Exactly 1 page", pages == 1, detail))
-        ok, d = band_touches_top(pdf, style["navy"])
-        checks.append(Check("Header band touches top edge", ok, d))
+        if style.get("header", "band") == "band":       # only the Classic Band template has a band
+            ok, d = band_touches_top(pdf, style.get("band", style["navy"]))
+            checks.append(Check("Header band touches top edge", ok, d))
     unk = unknown_tools(content, prof)
     checks.append(Check("Only tools from your main CV", not unk, ", ".join(unk[:10])))
     nums = unknown_numbers(cv_text_for_numbers(content), prof)
@@ -216,8 +217,9 @@ def check_letter(letter: LetterContent, prof: CVProfile, pdf: Optional[Path], st
     if pdf is not None:
         pages = page_count(pdf)
         checks.append(Check("Exactly 1 page", pages == 1, "" if pages == 1 else f"{pages} pages"))
-        ok, d = band_touches_top(pdf, style["navy"])
-        checks.append(Check("Header band touches top edge", ok, d))
+        if style.get("header", "band") == "band":
+            ok, d = band_touches_top(pdf, style.get("band", style["navy"]))
+            checks.append(Check("Header band touches top edge", ok, d))
     text = "\n".join(letter.paragraphs)
     # numbers from the job ad (e.g. "5 months", a start date) may be named in the letter; others must be on your CV
     from_ad = numbers_in(job_text or "")

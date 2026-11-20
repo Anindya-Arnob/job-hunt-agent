@@ -60,7 +60,6 @@ export default function MyCV() {
   if (!cv.data) return <div className="muted">Loading…</div>
   const active = cv.data.profiles.filter((p) => !p.archived_at)
   const archived = cv.data.profiles.filter((p) => p.archived_at)
-  const st = cv.data.style
 
   if (editing) return <Editor editing={editing} setEditing={setEditing} onSave={saveEdit} />
 
@@ -98,16 +97,8 @@ export default function MyCV() {
 
       <PhotoCard data={cv.data} onChanged={cv.reload} />
 
-      <div className="card">
-        <div className="card-h"><span className="flex items-center gap-2"><Palette size={16} />Layout template</span>
-          <span><input ref={tplRef} type="file" accept=".docx" className="hidden" onChange={(e) => uploadTemplate(e.target.files[0])} />
-            <button className="btn-outline" onClick={() => tplRef.current.click()}><Upload size={14} />Upload template</button></span></div>
-        <div className="flex flex-wrap items-center gap-4 p-4 text-sm">
-          {[['Header band', st.navy], ['Heading rule', st.teal], ['Text', st.text], ['Links', st.link]].map(([l, c]) => (
-            <div key={l} className="flex items-center gap-2"><span className="h-6 w-6 rounded border" style={{ background: `#${c}` }} />{l}</div>))}
-          <div className="muted">Font {st.font} · headings {st.heading_pt} pt · body {st.body_pt} pt. Your content and the layout are stored separately, so a new CV never breaks the formatting.</div>
-        </div>
-      </div>
+      <Templates data={cv.data} onUploadColours={() => tplRef.current.click()} />
+      <input ref={tplRef} type="file" accept=".docx" className="hidden" onChange={(e) => { uploadTemplate(e.target.files[0]); e.target.value = '' }} />
 
       {archived.length > 0 && (
         <div className="card">
@@ -150,6 +141,67 @@ export default function MyCV() {
         </Modal>)}
     </div>
   )
+}
+
+// ---------------------------------------------------------- templates ---
+const ATS = { best: ['ATS: best', 'bg-emerald-50 text-emerald-700 ring-emerald-200'], good: ['ATS: good', 'bg-sky-50 text-sky-700 ring-sky-200'], ok: ['ATS: e-mail best', 'bg-amber-50 text-amber-700 ring-amber-200'] }
+
+function Templates({ data, onUploadColours }) {
+  const list = useAsync(() => api.get('/api/cv/templates'))
+  const toast = useToast()
+  const [big, setBig] = useState(null)
+  const [active, setActive] = useState(null)
+  useEffect(() => { if (list.data) setActive(list.data.active) }, [list.data])
+  if (!list.data) return null
+  const bust = `${data.main_version_id}-${data.has_photo}-${data.cv_photo}-${JSON.stringify(data.style).length}`
+  const use = async (t) => {
+    try { await api.put('/api/settings', { cv_template: t.id }); setActive(t.id); toast(`“${t.name}” is now used for every CV and cover letter you build`) }
+    catch (e) { toast(e.message, 'error') }
+  }
+  const src = (t) => `/api/cv/templates/${t.id}/preview.png?v=${encodeURIComponent(bust)}`
+  return (
+    <div className="card" data-testid="templates">
+      <div className="card-h"><span className="flex items-center gap-2"><Palette size={16} />CV template</span>
+        <span className="text-xs font-normal muted">Your main CV shown in each one. One click switches; your content stays the same.</span></div>
+      {!data.main && <div className="p-4 text-sm muted">Upload your CV to see it in every template.</div>}
+      <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+        {list.data.templates.map((t) => {
+          const on = active === t.id
+          return (
+            <div key={t.id} className={`flex flex-col overflow-hidden rounded-xl border ${on ? 'border-teal ring-2 ring-teal' : 'border-slate-200'}`} data-testid={`tpl-${t.id}`}>
+              <button type="button" className="relative block aspect-[210/297] w-full overflow-hidden bg-white" title="See it bigger" aria-label="See it bigger" onClick={() => setBig(t)}>
+                {data.main && <TplImg src={src(t)} alt={`${t.name} preview`} />}
+              </button>
+              <div className="flex flex-1 flex-col gap-1.5 p-3 text-sm">
+                <div className="flex items-center gap-2 font-semibold">{t.name}{on && <span className="chip bg-teal text-white">In use</span>}</div>
+                <div className="flex flex-wrap gap-1 text-[11px]">
+                  <span className={`rounded-full px-1.5 py-0.5 ring-1 ${ATS[t.ats][1]}`}>{ATS[t.ats][0]}</span>
+                  <span className="rounded-full bg-slate-50 px-1.5 py-0.5 text-slate-600 ring-1 ring-slate-200">{t.photo ? 'Photo area' : 'No photo'}</span></div>
+                <p className="flex-1 text-xs muted">{t.desc}</p>
+                {t.id === 'classic' && <button type="button" className="self-start text-xs text-teal-600 underline" onClick={onUploadColours}>Use the colours of my own .docx</button>}
+                <button className="btn-teal mt-1 justify-center disabled:opacity-60" disabled={on} onClick={() => use(t)}>{on ? <><Check size={14} />In use</> : 'Use this template'}</button>
+              </div>
+            </div>)
+        })}
+      </div>
+      {big && (
+        <Modal open wide title={big.name} onClose={() => setBig(null)}
+          footer={<><button className="btn-outline" onClick={() => setBig(null)}>Close</button>
+            <button className="btn-teal" disabled={active === big.id} onClick={() => { use(big); setBig(null) }}>{active === big.id ? 'In use' : 'Use this template'}</button></>}>
+          <img src={src(big)} alt={`${big.name} large preview`} className="mx-auto max-h-[75vh] border border-slate-200 bg-white" />
+        </Modal>)}
+    </div>
+  )
+}
+
+function TplImg({ src, alt }) {
+  const [state, setState] = useState('loading')
+  return (<>
+    {state === 'loading' && <div className="absolute inset-0 flex items-center justify-center text-xs muted">Drawing your CV…</div>}
+    {state === 'error' && <div className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs muted">Preview not available (PDF maker missing?)</div>}
+    <img src={src} alt={alt} loading="lazy" className={`h-full w-full object-cover object-top ${state === 'ok' ? '' : 'opacity-0'}`}
+      onLoad={() => setState('ok')} onError={() => setState('error')} />
+  </>)
 }
 
 // -------------------------------------------------------------- photo ---
