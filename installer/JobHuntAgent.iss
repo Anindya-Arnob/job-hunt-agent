@@ -52,8 +52,8 @@ Name: "{userprograms}\Job Hunt Agent - Chrome helper folder"; Filename: "{app}\e
 Name: "{userdesktop}\Job Hunt Agent"; Filename: "{app}\scripts\start.bat"; WorkingDir: "{app}\scripts"; IconFilename: "{app}\scripts\job-hunt-agent.ico"; Comment: "Start Job Hunt Agent (close its window to stop it)"; Flags: runminimized; Tasks: desktopicon
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\windows-setup.ps1"""; StatusMsg: "Installing Python, the app's packages and Claude Code (5-10 minutes the first time)..."; Flags: waituntilterminated; Check: not WizardSilent
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\windows-setup.ps1"" -Unattended"; StatusMsg: "Installing Python and the app's packages..."; Flags: waituntilterminated runhidden; Check: WizardSilent
+Filename: "{app}\scripts\windows-setup.cmd"; StatusMsg: "Installing Python, the app's packages and Claude Code (5-10 minutes the first time)..."; Flags: waituntilterminated; Check: not WizardSilent
+Filename: "{app}\scripts\windows-setup.cmd"; Parameters: "-Unattended"; StatusMsg: "Installing Python and the app's packages..."; Flags: waituntilterminated runhidden; Check: WizardSilent
 Filename: "{app}\scripts\start.bat"; WorkingDir: "{app}\scripts"; Description: "Start Job Hunt Agent now"; Flags: postinstall nowait skipifsilent runminimized
 
 [UninstallDelete]
