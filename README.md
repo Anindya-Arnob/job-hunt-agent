@@ -179,7 +179,7 @@ No Node.js needed: the built web app is included in `frontend/dist`.
 
 The installer puts the app in `%LOCALAPPDATA%\JobHuntAgent`, adds **Job Hunt Agent** to the Start menu and your Desktop, and sets up Python, the packages, the browser for the site agents and Claude Code by itself (5-10 minutes the first time). If you have neither Microsoft Word nor LibreOffice, it offers to install LibreOffice for the PDFs. Installing a newer version on top keeps your CV, jobs, documents and settings; uninstall it from Windows *Settings → Apps* (your data folder stays).
 
-Windows may say *"Windows protected your PC"* because the file is not signed by a paid publisher: click **More info → Run anyway**. Every release is built and tested on a real Windows machine by GitHub Actions ([installer script](installer/JobHuntAgent.iss)).
+Windows may say *"Windows protected your PC"* because the file is not signed by a paid publisher: click **More info → Run anyway**. Every release is built and tested on a real Windows machine by GitHub Actions ([installer script](installer/JobHuntAgent.iss)); a new version number in the `VERSION` file publishes a new release.
 
 ### 2. Install the app (from the source code)
 

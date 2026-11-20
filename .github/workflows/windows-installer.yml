@@ -7,9 +7,6 @@ name: Windows installer
 on:
   push:
     branches: [main]
-    tags: ["v*"]
-  release:
-    types: [published]          # a release made on GitHub gets the installer attached
   workflow_dispatch:
 
 permissions:
@@ -29,7 +26,8 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
-          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.0.0-dev.${{ github.run_number }}" }
+          $v = (Get-Content VERSION -Raw).Trim()
+          "VERSION=$v" >> $env:GITHUB_ENV
           & $iscc /Qp "/DAppVersion=$v" installer\JobHuntAgent.iss
           if ($LASTEXITCODE) { exit 1 }
           Get-Item installer\Output\JobHuntAgentSetup.exe | Format-List Name, Length
@@ -98,15 +96,29 @@ jobs:
           name: JobHuntAgentSetup
           path: installer/Output/JobHuntAgentSetup.exe
 
-      - name: Publish the release (tags only)
-        if: github.ref_type == 'tag'
+      - name: Is this version released yet?
+        id: rel
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "v$env:VERSION" --repo "${{ github.repository }}" *> $null
+          "new=$(if ($LASTEXITCODE) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+
+      - name: Publish release v${{ env.VERSION }} (only when the VERSION file has a new version)
+        if: github.ref == 'refs/heads/main' && steps.rel.outputs.new == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Job Hunt Agent v${{ env.VERSION }}
+          make_latest: "true"
           files: installer/Output/JobHuntAgentSetup.exe
-          name: Job Hunt Agent ${{ github.ref_name }}
           body: |
             **Windows:** download `JobHuntAgentSetup.exe` below and double-click it. No admin rights needed.
-            The first start sets up Python and everything else (5-10 minutes). Installing a newer version on top keeps your data.
+            The setup installs Python and everything else (5-10 minutes the first time). Installing a newer version on top keeps your data.
             Windows may show "Windows protected your PC" because the file is not signed by a paid publisher: click **More info → Run anyway**.
 
             **Mac / Linux:** `curl -fsSL https://raw.githubusercontent.com/Anindya-Arnob/job-hunt-agent/main/scripts/setup.sh | bash`
+
+            This installer was built and tested on a fresh Windows machine (install, start, update on top, uninstall) by GitHub Actions.
