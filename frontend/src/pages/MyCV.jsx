@@ -151,6 +151,10 @@ function Templates({ data, onUploadColours }) {
   const toast = useToast()
   const [big, setBig] = useState(null)
   const [active, setActive] = useState(null)
+  // previews are drawn one after another: ten at once took all of the browser's connections to the app,
+  // so other screens waited for them
+  const [turn, setTurn] = useState(0)
+  const next = () => setTurn((t) => t + 1)
   useEffect(() => { if (list.data) setActive(list.data.active) }, [list.data])
   if (!list.data) return null
   const bust = `${data.main_version_id}-${data.has_photo}-${data.cv_photo}-${JSON.stringify(data.style).length}`
@@ -165,12 +169,12 @@ function Templates({ data, onUploadColours }) {
         <span className="text-xs font-normal muted">Your main CV shown in each one. One click switches; your content stays the same.</span></div>
       {!data.main && <div className="p-4 text-sm muted">Upload your CV to see it in every template.</div>}
       <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
-        {list.data.templates.map((t) => {
+        {list.data.templates.map((t, i) => {
           const on = active === t.id
           return (
             <div key={t.id} className={`flex flex-col overflow-hidden rounded-xl border ${on ? 'border-teal ring-2 ring-teal' : 'border-slate-200'}`} data-testid={`tpl-${t.id}`}>
               <button type="button" className="relative block aspect-[210/297] w-full overflow-hidden bg-white" title="See it bigger" aria-label="See it bigger" onClick={() => setBig(t)}>
-                {data.main && <TplImg src={src(t)} alt={`${t.name} preview`} />}
+                {data.main && <TplImg src={i <= turn ? src(t) : null} alt={`${t.name} preview`} onDone={i === turn ? next : undefined} />}
               </button>
               <div className="flex flex-1 flex-col gap-1.5 p-3 text-sm">
                 <div className="flex items-center gap-2 font-semibold">{t.name}{on && <span className="chip bg-teal text-white">In use</span>}</div>
@@ -194,13 +198,13 @@ function Templates({ data, onUploadColours }) {
   )
 }
 
-function TplImg({ src, alt }) {
+function TplImg({ src, alt, onDone }) {
   const [state, setState] = useState('loading')
   return (<>
-    {state === 'loading' && <div className="absolute inset-0 flex items-center justify-center text-xs muted">Drawing your CV…</div>}
+    {state === 'loading' && <div className="absolute inset-0 flex items-center justify-center text-xs muted">{src ? 'Drawing your CV…' : 'Waiting…'}</div>}
     {state === 'error' && <div className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs muted">Preview not available (PDF maker missing?)</div>}
-    <img src={src} alt={alt} loading="lazy" className={`h-full w-full object-cover object-top ${state === 'ok' ? '' : 'opacity-0'}`}
-      onLoad={() => setState('ok')} onError={() => setState('error')} />
+    {src && <img src={src} alt={alt} className={`h-full w-full object-cover object-top ${state === 'ok' ? '' : 'opacity-0'}`}
+      onLoad={() => { setState('ok'); onDone && onDone() }} onError={() => { setState('error'); onDone && onDone() }} />}
   </>)
 }
 
