@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Check, Download, GitCompare, History, Plus, Star, Trash2, Undo2, Upload, Pencil, Palette } from 'lucide-react'
 import { api, fileUrl, fmtDate } from '../api'
-import { Empty, Modal, PdfPages, useAsync, useToast } from '../ui'
+import { Empty, Modal, ParsedText, PdfPages, useAsync, useToast } from '../ui'
 
 const dot = (a) => (a || []).join(' · ')
 const undot = (s) => s.split(/\s*[·•;]\s*/).map((x) => x.trim()).filter(Boolean)
@@ -155,13 +155,18 @@ function Editor({ editing, setEditing, onSave }) {
   const [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState(false)
   const timer = useRef()
+  const seq = useRef(0)
   useEffect(() => {
     clearTimeout(timer.current)
     timer.current = setTimeout(async () => {
+      const n = ++seq.current
       setBusy(true)
-      try { setPreview(await api.post('/api/cv/preview', { profile: editing.profile })) } catch { /* ignore */ }
-      setBusy(false)
-    }, 900)
+      try {
+        const r = await api.post('/api/cv/preview', { profile: editing.profile })
+        if (n === seq.current) setPreview(r)        // a slower, older render never replaces a newer one
+      } catch { /* ignore */ }
+      if (n === seq.current) setBusy(false)
+    }, 1500)
     return () => clearTimeout(timer.current)
   }, [editing.profile])
   return (
@@ -191,6 +196,14 @@ function Field({ label, value, onChange, warn, area, rows = 3, mono }) {
     <label className="block"><span className="label">{label}</span>
       {area ? <textarea className={cls} rows={rows} value={value || ''} onChange={(e) => onChange(e.target.value)} />
         : <input className={cls} value={value || ''} onChange={(e) => onChange(e.target.value)} />}</label>
+  )
+}
+
+function ListField({ label, value, onChange, sep = 'lines', area, rows = 3 }) {
+  return (
+    <label className="block"><span className="label">{label}</span>
+      <ParsedText className="input" area={area} rows={rows} value={value || []} onChange={onChange}
+        fmt={sep === 'dot' ? dot : lines} parse={sep === 'dot' ? undot : unlines} /></label>
   )
 }
 
@@ -229,29 +242,29 @@ export function ProfileForm({ value: p, onChange, uncertain }) {
       </div>
       <ListSection title="Skills" items={p.skills} blank={{ category: '', items: [] }} onChange={(v) => set({ skills: v })}
         render={(g, up) => <div className="grid grid-cols-3 gap-2"><Field label="Category" value={g.category} onChange={(v) => up({ category: v })} />
-          <div className="col-span-2"><Field label="Items (· separated)" value={dot(g.items)} onChange={(v) => up({ items: undot(v) })} /></div></div>} />
+          <div className="col-span-2"><ListField sep="dot" label="Items (· separated)" value={g.items} onChange={(v) => up({ items: v })} /></div></div>} />
       <ListSection title="Experience" items={p.experience} blank={{ title: '', org: '', meta: '', dates: '', stack: [], bullets: [] }} onChange={(v) => set({ experience: v })}
         render={(e, up, i) => <div className="grid grid-cols-2 gap-2">
           <Field label="Title" value={e.title} onChange={(v) => up({ title: v })} /><Field label="Organisation" value={e.org} onChange={(v) => up({ org: v })} />
           <Field label="Type · place" value={e.meta} onChange={(v) => up({ meta: v })} /><Field label="Dates" value={e.dates} onChange={(v) => up({ dates: v })} warn={w(`experience[${i}].dates`)} />
-          <div className="col-span-2"><Field label="Stack (· separated)" value={dot(e.stack)} onChange={(v) => up({ stack: undot(v) })} /></div>
-          <div className="col-span-2"><Field label="Bullets (one per line)" area rows={4} value={lines(e.bullets)} onChange={(v) => up({ bullets: unlines(v) })} /></div></div>} />
+          <div className="col-span-2"><ListField sep="dot" label="Stack (· separated)" value={e.stack} onChange={(v) => up({ stack: v })} /></div>
+          <div className="col-span-2"><ListField label="Bullets (one per line)" area rows={4} value={e.bullets} onChange={(v) => up({ bullets: v })} /></div></div>} />
       <ListSection title="Projects" items={p.projects} blank={{ name: '', link: '', note: '', dates: '', stack: [], bullets: [] }} onChange={(v) => set({ projects: v })}
         render={(e, up, i) => <div className="grid grid-cols-2 gap-2">
           <Field label="Name" value={e.name} onChange={(v) => up({ name: v })} /><Field label="Link" value={e.link} onChange={(v) => up({ link: v })} />
           <Field label="Note e.g. (Ongoing)" value={e.note} onChange={(v) => up({ note: v })} /><Field label="Dates" value={e.dates} onChange={(v) => up({ dates: v })} warn={w(`projects[${i}].dates`)} />
-          <div className="col-span-2"><Field label="Stack (· separated)" value={dot(e.stack)} onChange={(v) => up({ stack: undot(v) })} /></div>
-          <div className="col-span-2"><Field label="Bullets (one per line)" area rows={4} value={lines(e.bullets)} onChange={(v) => up({ bullets: unlines(v) })} /></div></div>} />
+          <div className="col-span-2"><ListField sep="dot" label="Stack (· separated)" value={e.stack} onChange={(v) => up({ stack: v })} /></div>
+          <div className="col-span-2"><ListField label="Bullets (one per line)" area rows={4} value={e.bullets} onChange={(v) => up({ bullets: v })} /></div></div>} />
       <ListSection title="Education" items={p.education} blank={{ degree: '', school: '', dates: '', bullets: [] }} onChange={(v) => set({ education: v })}
         render={(e, up) => <div className="grid grid-cols-2 gap-2">
           <Field label="Degree" value={e.degree} onChange={(v) => up({ degree: v })} /><Field label="School" value={e.school} onChange={(v) => up({ school: v })} />
           <Field label="Dates" value={e.dates} onChange={(v) => up({ dates: v })} /><div />
-          <div className="col-span-2"><Field label="Bullets (one per line)" area rows={2} value={lines(e.bullets)} onChange={(v) => up({ bullets: unlines(v) })} /></div></div>} />
+          <div className="col-span-2"><ListField label="Bullets (one per line)" area rows={2} value={e.bullets} onChange={(v) => up({ bullets: v })} /></div></div>} />
       <ListSection title="Certifications" items={p.certifications} blank={{ name: '', issuer: '', dates: '', link: '', bullets: [] }} onChange={(v) => set({ certifications: v })}
         render={(e, up) => <div className="grid grid-cols-2 gap-2">
           <Field label="Name" value={e.name} onChange={(v) => up({ name: v })} /><Field label="Issuer" value={e.issuer} onChange={(v) => up({ issuer: v })} />
           <Field label="Dates" value={e.dates} onChange={(v) => up({ dates: v })} /><Field label="Link" value={e.link} onChange={(v) => up({ link: v })} />
-          <div className="col-span-2"><Field label="Bullets" area rows={2} value={lines(e.bullets)} onChange={(v) => up({ bullets: unlines(v) })} /></div></div>} />
+          <div className="col-span-2"><ListField label="Bullets" area rows={2} value={e.bullets} onChange={(v) => up({ bullets: v })} /></div></div>} />
       <ListSection title="Languages" items={p.languages} blank={{ language: '', level: '' }} onChange={(v) => set({ languages: v })}
         render={(e, up) => <div className="grid grid-cols-2 gap-2"><Field label="Language" value={e.language} onChange={(v) => up({ language: v })} />
           <Field label="Level e.g. Elementary (A2)" value={e.level} onChange={(v) => up({ level: v })} /></div>} />

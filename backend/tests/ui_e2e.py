@@ -44,6 +44,14 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Edit").first.click()
     expect(page.get_by_text("Live preview")).to_be_visible()
     expect(page.locator("img[alt='page 1']").first).to_be_visible(timeout=60000)
+    # typing in a list field keeps every key: Enter starts a new bullet, the space after a word stays
+    box = page.locator("label", has_text="Bullets (one per line)").locator("textarea").first
+    box.click(); box.press("End"); box.press("Control+End")
+    box.press_sequentially("\nBuilt a new thing with Python ", delay=15)
+    assert box.input_value().endswith("\nBuilt a new thing with Python "), repr(box.input_value()[-60:])
+    sk = page.locator("label", has_text="Items (· separated)").locator("input").first
+    sk.press("End"); sk.press_sequentially(" · New Tool", delay=15)
+    assert sk.input_value().endswith(" · New Tool"), sk.input_value()
     page.get_by_placeholder("What changed?").fill("UI test edit")
     page.wait_for_timeout(1500)
     shot(page, "04_cv_editor")

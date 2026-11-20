@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Download, FolderOpen, Pencil, Save, Trash2 } from 'lucide-react'
 import { api, fileUrl, fmtDate } from '../api'
-import { CheckList, Empty, Modal, PdfPages, useAsync, useToast } from '../ui'
+import { CheckList, Empty, Modal, ParsedText, PdfPages, useAsync, useToast } from '../ui'
 import AtsPanel, { AtsBadge } from '../components/AtsPanel'
 
 export default function Documents() {
@@ -109,6 +109,11 @@ function DownloadPair({ label, doc }) {
 
 const lines = (a) => (a || []).join('\n')
 const unlines = (s) => s.split('\n').map((x) => x.trim()).filter(Boolean)
+const fmtSkills = (sk) => sk.map((g) => `${g.category}: ${g.items.join(' · ')}`).join('\n')
+const parseSkills = (t) => unlines(t).map((l) => {
+  const [cat, ...rest] = l.split(':')
+  return { category: cat.trim(), items: rest.join(':').split('·').map((x) => x.trim()).filter(Boolean) }
+})
 
 function EditModal({ edit, setEdit, onSave }) {
   const c = edit.content
@@ -122,14 +127,14 @@ function EditModal({ edit, setEdit, onSave }) {
           <div className="md:col-span-2"><span className="label">Tagline</span><input className="input" value={c.tagline} onChange={(e) => upd((n) => { n.tagline = e.target.value })} /></div>
           <div className="md:col-span-2"><span className="label">Summary</span><textarea className="input h-20" value={c.summary} onChange={(e) => upd((n) => { n.summary = e.target.value })} /></div>
           <div className="md:col-span-2"><span className="label">Skills (one row per line: Category: item · item)</span>
-            <textarea className="input h-32 font-mono text-xs" value={c.skills.map((g) => `${g.category}: ${g.items.join(' · ')}`).join('\n')}
-              onChange={(e) => upd((n) => { n.skills = unlines(e.target.value).map((l) => { const [cat, ...rest] = l.split(':'); return { category: cat.trim(), items: rest.join(':').split('·').map((x) => x.trim()).filter(Boolean) } }) })} /></div>
+            <ParsedText area className="input h-32 font-mono text-xs" value={c.skills} fmt={fmtSkills} parse={parseSkills}
+              onChange={(v) => upd((n) => { n.skills = v })} /></div>
           {c.experience.map((x, i) => (
             <div key={`e${i}`} className="md:col-span-2"><span className="label">{x.title} – {x.org} (one bullet per line)</span>
-              <textarea className="input h-24" value={lines(x.bullets)} onChange={(e) => upd((n) => { n.experience[i].bullets = unlines(e.target.value) })} /></div>))}
+              <ParsedText area className="input h-24" value={x.bullets} fmt={lines} parse={unlines} onChange={(v) => upd((n) => { n.experience[i].bullets = v })} /></div>))}
           {c.projects.map((x, i) => (
             <div key={`p${i}`}><span className="label">{x.name}</span>
-              <textarea className="input h-28" value={lines(x.bullets)} onChange={(e) => upd((n) => { n.projects[i].bullets = unlines(e.target.value) })} /></div>))}
+              <ParsedText area className="input h-28" value={x.bullets} fmt={lines} parse={unlines} onChange={(v) => upd((n) => { n.projects[i].bullets = v })} /></div>))}
           <p className="text-xs muted md:col-span-2">Only tools and numbers from your main CV pass the checks. Saving re-renders the .docx and .pdf in place.</p>
         </div>
       ) : (

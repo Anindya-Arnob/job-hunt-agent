@@ -177,3 +177,15 @@ export function PdfPages({ path, bust = 0, className = '' }) {
     </div>
   )
 }
+
+// A text box for something stored as a list (bullets, "A · B" items). It keeps exactly what you type and only
+// re-reads the stored value when it changed from outside: re-parsing on every key dropped the new line after
+// Enter and the space after a word, so typing in My CV felt broken.
+export function ParsedText({ value, fmt, parse, onChange, area, ...props }) {
+  const [raw, setRaw] = useState(() => fmt(value))
+  useEffect(() => {
+    if (JSON.stringify(parse(raw)) !== JSON.stringify(value)) setRaw(fmt(value))
+  }, [JSON.stringify(value)]) // eslint-disable-line react-hooks/exhaustive-deps
+  const Tag = area ? 'textarea' : 'input'
+  return <Tag {...props} value={raw} onChange={(e) => { setRaw(e.target.value); onChange(parse(e.target.value)) }} />
+}
