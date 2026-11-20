@@ -203,13 +203,6 @@ def _left_border(paragraph, hex_: str, size: int = 24) -> None:
     pPr.append(bdr)
 
 
-def _letter_spacing(run, twentieths: int) -> None:
-    rpr = run._r.get_or_add_rPr()
-    sp = OxmlElement("w:spacing")
-    sp.set(qn("w:val"), str(twentieths))
-    rpr.append(sp)
-
-
 def _tiny(paragraph) -> None:
     """The empty paragraph Word needs after a table in a cell: as small as possible."""
     _spacing(paragraph, 0, 0, line=0.5)
@@ -434,8 +427,8 @@ class Builder:
         elif kind == "center_rule":
             _spacing(p, before, 3)
             _bottom_border(p, st["teal"], 4)
-            r = _run(p, text.upper(), st["heading_pt"], st["navy"], bold=True, font=f)
-            _letter_spacing(r, 30)
+            # (no letter spacing: some PDF makers then write "E X P E R I E N C E", which an ATS cannot read)
+            _run(p, text.upper(), st["heading_pt"], st["navy"], bold=True, font=f)
         else:                                            # rule
             _spacing(p, before, 2)
             _bottom_border(p, st["teal"])
