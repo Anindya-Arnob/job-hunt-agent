@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Mail, MonitorPlay, Play, Puzzle, RefreshCw, RotateCcw, SkipForward, Square, UserRound } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Copy, Download, ExternalLink, FileText, Files, Loader2, Mail, MonitorPlay, Play, Puzzle, RefreshCw, RotateCcw, SkipForward, Square, UserRound } from 'lucide-react'
 import { api, fileUrl, fmtDate, fmtDateTime } from '../api'
-import { Empty, Tabs, useAsync, useToast } from '../ui'
+import { Empty, Modal, Tabs, useAsync, useToast } from '../ui'
 import { useOnEvent } from '../events'
 import { BeingBuilt, BuildingNote, useActiveBuilds } from '../components/ActiveBuilds'
 
@@ -96,6 +96,49 @@ function ExtensionCard({ ext, active, onStop }) {
   )
 }
 
+// Cover letter, CV and the documents you tick, as one PDF (e-mail applications, forms with one upload field)
+function OnePdf({ job, onClose }) {
+  const docs = useAsync(() => api.get('/api/attachments'))
+  const toast = useToast()
+  const [letter, setLetter] = useState(!!job.letter)
+  const [cv, setCv] = useState(true)
+  const [picked, setPicked] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [out, setOut] = useState(null)
+  useEffect(() => { if (docs.data && picked === null) setPicked(new Set(docs.data.items.filter((d) => d.use).map((d) => d.id))) }, [docs.data]) // eslint-disable-line
+  const make = async () => {
+    setBusy(true); setOut(null)
+    try { setOut(await api.post(`/api/apply/jobs/${job.id}/one-pdf`, { letter, cv, attachment_ids: [...(picked || [])] })) }
+    catch (e) { toast(e.message, 'error') }
+    setBusy(false)
+  }
+  const flip = (id) => { const n = new Set(picked); n.has(id) ? n.delete(id) : n.add(id); setPicked(n); setOut(null) }
+  const items = docs.data?.items || []
+  return (
+    <Modal open title={`One PDF – ${job.company}`} onClose={onClose}
+      footer={<><button className="btn-outline" onClick={onClose}>Close</button>
+        <button className="btn-teal" disabled={busy || (!letter && !cv && !picked?.size)} onClick={make}>{busy ? <Loader2 size={14} className="animate-spin" /> : <Files size={14} />}Make one PDF</button></>}>
+      <p className="mb-3 text-sm muted">For e-mail applications and forms with only one upload field. Order as German recruiters expect: cover letter, CV, then your documents, newest first. Kept under {5} MB.</p>
+      <div className="space-y-1.5 text-sm" data-testid="one-pdf-parts">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={letter} disabled={!job.letter} onChange={(e) => { setLetter(e.target.checked); setOut(null) }} />Cover letter{!job.letter && <span className="muted">(none built)</span>}</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={cv} onChange={(e) => { setCv(e.target.checked); setOut(null) }} />CV</label>
+        {items.map((d) => (
+          <label key={d.id} className="flex items-center gap-2"><input type="checkbox" checked={!!picked?.has(d.id)} onChange={() => flip(d.id)} />
+            {d.name}<span className="text-xs muted">{d.kind_label}{d.issued ? ` · ${d.issued}` : ''} · {d.pages} p.</span></label>))}
+        {docs.data && !items.length && <div className="text-xs muted">No certificates yet – add them on <Link className="text-teal-600 underline" to="/mydocs">My documents</Link>.</div>}
+      </div>
+      {out && (
+        <div className={`mt-4 rounded-lg border p-3 text-sm ${out.over_limit ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`} data-testid="one-pdf-result">
+          <div className="font-semibold">{out.name}</div>
+          <div>{out.pages} pages · {(out.size / 1024 / 1024).toFixed(1)} MB{out.over_limit ? ' – still over 5 MB: leave out a document or send it separately.' : ''}</div>
+          <div className="mt-2 flex gap-2">
+            <a className="btn-outline py-1 text-xs" href={fileUrl(out.path)} target="_blank" rel="noreferrer"><ExternalLink size={12} />Open</a>
+            <a className="btn-outline py-1 text-xs" href={fileUrl(out.path, true)}><Download size={12} />Download</a></div>
+        </div>)}
+    </Modal>
+  )
+}
+
 export default function Apply() {
   const q = useAsync(() => api.get('/api/apply/queue?all=true'))
   const prof = useAsync(() => api.get('/api/apply/profile'))
@@ -105,6 +148,7 @@ export default function Apply() {
   const act = useAsync(() => api.get('/api/ext/active'))
   const [sel, setSel] = useState(null)
   const [tab, setTab] = useState('todo')
+  const [onePdf, setOnePdf] = useState(null)
   const builds = useActiveBuilds()                      // asked from the app: still right after you come back
   const toast = useToast()
   const refresh = async () => setSt(await api.get('/api/apply/state'))
@@ -183,6 +227,7 @@ export default function Apply() {
           {' '}{st.history.reduce((n, h) => n + (h.learned || 0), 0)} new answers saved.
         </div>)}
 
+      {onePdf && <OnePdf job={onePdf} onClose={() => setOnePdf(null)} />}
       <div className="overflow-hidden glass rounded-2xl">
         <div className="flex flex-wrap items-center gap-2 px-5 pt-3">
           <div className="mr-auto"><div className="text-sm font-semibold text-navy">Your jobs with a finished CV</div>
@@ -199,7 +244,7 @@ export default function Apply() {
               const busy = !!builds.byJob[j.id]
               const att = ATTEMPT(j.last_attempt)
               return (
-              <label key={j.id} className={`grid cursor-pointer grid-cols-[24px_48px_minmax(0,1fr)_96px_110px_96px_170px_24px] items-center gap-3 px-5 py-3 ${st?.current?.id === j.id && st?.running ? 'bg-teal-50' : j.applied ? 'bg-emerald-50/30 hover:bg-emerald-50/60' : 'hover:bg-slate-50'}`}>
+              <label key={j.id} className={`grid cursor-pointer grid-cols-[24px_48px_minmax(0,1fr)_96px_170px_96px_170px_24px] items-center gap-3 px-5 py-3 ${st?.current?.id === j.id && st?.running ? 'bg-teal-50' : j.applied ? 'bg-emerald-50/30 hover:bg-emerald-50/60' : 'hover:bg-slate-50'}`}>
                 <input type="checkbox" className="accent-teal" checked={!!sel?.has(j.id)} onChange={() => toggle(j.id)} disabled={st?.running} />
                 <ScorePill score={j.score} />
                 <div className="min-w-0"><div className="truncate font-semibold text-slate-800">{j.title}</div>
@@ -211,7 +256,9 @@ export default function Apply() {
                 <span className="flex gap-2 text-xs">
                   {busy ? <span className="inline-flex items-center gap-1 text-slate-400"><Loader2 size={12} className="animate-spin" />writing…</span> : <>
                   <a className="inline-flex items-center gap-1 text-teal-600 hover:underline" href={fileUrl(j.cv)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><FileText size={12} />CV</a>
-                  {j.letter && <a className="inline-flex items-center gap-1 text-teal-600 hover:underline" href={fileUrl(j.letter)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Mail size={12} />Letter</a>}</>}
+                  {j.letter && <a className="inline-flex items-center gap-1 text-teal-600 hover:underline" href={fileUrl(j.letter)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Mail size={12} />Letter</a>}
+                  <button type="button" className="inline-flex items-center gap-1 text-teal-600 hover:underline" title="Cover letter + CV + your certificates as one PDF"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOnePdf(j) }}><Files size={12} />One PDF</button></>}
                 </span>
                 <SureButton className="btn border border-slate-200 bg-slate-50 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50" ask="Rebuild?"
                   title={busy ? 'Being built right now' : 'Write a new CV and cover letter for this job'} disabled={busy} onClick={() => !busy && rebuild([j.id])}>

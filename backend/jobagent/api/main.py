@@ -670,6 +670,21 @@ def apply_not_applied(job_id: int):
     return {"ok": True}
 
 
+class OnePdfIn(BaseModel):
+    letter: bool = True
+    cv: bool = True
+    attachment_ids: list[int] = []
+
+
+@app.post("/api/apply/jobs/{job_id}/one-pdf")
+async def apply_one_pdf(job_id: int, body: OnePdfIn):
+    from .. import attachments as A
+    try:
+        return await asyncio.to_thread(A.application_pdf, job_id, body.letter, body.cv, body.attachment_ids)
+    except A.AttachmentError as e:
+        _err(e)
+
+
 @app.post("/api/apply/jobs/{job_id}/applied")
 def apply_mark_applied(job_id: int):
     from ..apply import session as AS

@@ -208,3 +208,64 @@ def kind_for_field(text: str) -> Optional[str]:
     if re.search(ALL_WORDS + r"|zeugnis|certificate", low):
         return "all"
     return None
+
+
+# ---------------------------------------------------------- one-PDF application ---
+LIMIT_MB = 5          # the usual e-mail and portal limit
+
+
+def _shrink(path: Path, limit: int) -> None:
+    """Pictures inside the PDF made smaller (long side 1600 px, JPEG) until it fits, when it is too big."""
+    if path.stat().st_size <= limit:
+        return
+    from pypdf import PdfReader, PdfWriter
+    for side, q in ((1600, 70), (1200, 55), (900, 45)):
+        w = PdfWriter(clone_from=PdfReader(str(path)))
+        for page in w.pages:
+            for img in page.images:
+                try:
+                    im = img.image.convert("RGB")
+                    im.thumbnail((side, side))
+                    img.replace(im, quality=q)
+                except Exception:
+                    continue
+        w.compress_identical_objects(remove_duplicates=True, remove_unreferenced=True)
+        tmp = path.with_suffix(".tmp.pdf")
+        with open(tmp, "wb") as f:
+            w.write(f)
+        tmp.replace(path)
+        if path.stat().st_size <= limit:
+            return
+
+
+def application_pdf(job_id: int, letter: bool = True, cv: bool = True,
+                    attachment_ids: Optional[list[int]] = None) -> dict:
+    """Cover letter, then CV, then the documents you ticked (newest first): one PDF for e-mail applications and
+    forms with a single upload field. Saved next to the job's CV."""
+    from .apply.bridge import docs_for
+    from .config import owner_name
+    from .textutil import safe_filename_part
+    with db.session_scope() as s:
+        job = s.get(m.Job, job_id)
+        if not job:
+            raise AttachmentError("Job not found")
+        company = job.company
+        d = s.exec(select(m.Document).where(m.Document.job_id == job_id, m.Document.kind == "cv")).first()
+        lang = ((d.content or {}).get("lang") if d else "") or "en"
+    docs = docs_for(job_id)
+    parts = ([Path(docs["letter"])] if letter and docs.get("letter") else []) + \
+            ([Path(docs["cv"])] if cv and docs.get("cv") else [])
+    picked = set(attachment_ids or [])
+    parts += [Path(a.file_path) for a in all_rows() if a.id in picked]
+    if not parts:
+        raise AttachmentError("Nothing to put in the PDF: build the CV first or tick at least one document.")
+    word = "Bewerbung" if lang == "de" else "Application"
+    folder_ = Path(docs["cv"]).parent if docs.get("cv") else folder() / "applications"
+    dest = folder_ / f"{word}_{safe_filename_part(owner_name())}_{safe_filename_part(company)}.pdf"
+    merge(parts, dest)
+    limit = LIMIT_MB * 1024 * 1024
+    _shrink(dest, limit)
+    from pypdf import PdfReader
+    size = dest.stat().st_size
+    return {"path": str(dest), "name": dest.name, "size": size, "pages": len(PdfReader(str(dest)).pages),
+            "over_limit": size > limit, "parts": [p.name for p in parts]}

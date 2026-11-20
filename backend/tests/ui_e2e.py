@@ -222,6 +222,14 @@ with sync_playwright() as p:
     page.locator("aside").get_by_role("link", name=re.compile(r"^Apply(\s|$)")).click()
     expect(page.get_by_text("Your jobs with a finished CV")).to_be_visible()
     expect(page.get_by_role("button", name="Apply in my browser")).to_be_visible()
+    # one PDF: letter + CV + your documents
+    page.get_by_role("button", name="One PDF").first.click()
+    expect(page.get_by_test_id("one-pdf-parts")).to_contain_text("Transcript of Records")
+    page.get_by_role("button", name="Make one PDF").click()
+    expect(page.get_by_test_id("one-pdf-result")).to_contain_text("pages", timeout=60000)
+    expect(page.get_by_test_id("one-pdf-result")).to_contain_text("Application_")
+    shot(page, "10d_one_pdf")
+    page.get_by_role("button", name="Close").click()
     # nothing is ticked for you: Rebuild / Apply only work on the jobs you tick
     expect(page.get_by_role("button", name="Use the app's Chrome window (0)")).to_be_disabled()
     expect(page.get_by_role("button", name="Rebuild ticked (0)")).to_be_disabled()
