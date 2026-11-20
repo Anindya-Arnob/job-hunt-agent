@@ -39,6 +39,16 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Confirm & save").click()
     expect(page.get_by_text("Main", exact=True)).to_be_visible()
     shot(page, "03_cv_list")
+    # photo: upload once, choose when it goes on the CV
+    from PIL import Image
+    Image.new("RGB", (600, 800), (190, 160, 140)).save(OUT / "me.jpg")
+    page.locator("input[type=file][accept='image/*']").set_input_files(str(OUT / "me.jpg"))
+    expect(page.get_by_alt_text("Your CV photo")).to_be_visible()
+    expect(page.get_by_label("Automatic: German CVs only")).to_be_checked()
+    page.get_by_label("Always").check()
+    expect(page.get_by_text("Saved", exact=True)).to_be_visible()
+    page.get_by_label("Automatic: German CVs only").check()
+    shot(page, "03b_cv_photo")
 
     # 3 edit -> live preview -> save version
     page.get_by_role("button", name="Edit").first.click()

@@ -23,6 +23,7 @@ from ..schemas import CVContent, CVProfile, LetterContent
 
 PAGE_W, PAGE_H = 11906, 16838          # A4 in twips
 SIDE = 680                              # left/right margin
+PHOTO_W = 1300                          # photo width in the header band (about 2.3 cm, 3:4)
 BOTTOM = 480
 TEXT_W = PAGE_W - 2 * SIDE
 
@@ -223,16 +224,30 @@ class Builder:
         return para
 
     # ----------------------------------------------------------- blocks ---
-    def header_band(self, prof: CVProfile, tagline: str) -> None:
+    def header_band(self, prof: CVProfile, tagline: str, photo: Optional[Path] = None) -> None:
         st = self.st
-        t = self.doc.add_table(rows=1, cols=1)
+        pad = 300 if self.compact == 0 else 220
         # Same set-up as your Word-saved master CV: exactly the page width, pulled left by the side margin
         over = 0
-        _tbl_props(t, PAGE_W, [PAGE_W], indent=-SIDE)
-        cell = t.rows[0].cells[0]
-        _set_cell_shading(cell, st["navy"])
-        pad = 300 if self.compact == 0 else 220
-        _cell_margins(cell, top=pad, bottom=pad - 60, left=SIDE + over, right=SIDE + over)
+        if photo:      # your photo on the right of the band, the text centred in the rest
+            pw = PHOTO_W + SIDE
+            t = self.doc.add_table(rows=1, cols=2)
+            _tbl_props(t, PAGE_W, [PAGE_W - pw, pw], indent=-SIDE)
+            cell, pc = t.rows[0].cells
+            for c in (cell, pc):
+                _set_cell_shading(c, st["navy"])
+            _cell_margins(cell, top=pad, bottom=pad - 60, left=SIDE + PHOTO_W // 2, right=120)
+            _cell_margins(pc, top=pad - 120, bottom=pad - 160, left=0, right=SIDE)
+            pp = pc.paragraphs[0]
+            pp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            _spacing(pp, 0, 0)
+            pp.add_run().add_picture(str(photo), width=Twips(PHOTO_W))
+        else:
+            t = self.doc.add_table(rows=1, cols=1)
+            _tbl_props(t, PAGE_W, [PAGE_W], indent=-SIDE)
+            cell = t.rows[0].cells[0]
+            _set_cell_shading(cell, st["navy"])
+            _cell_margins(cell, top=pad, bottom=pad - 60, left=SIDE + over, right=SIDE + over)
         f = st["font"]
         p = cell.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -346,10 +361,15 @@ def letter_date(d: date, lang: str = "en") -> str:
     return f"{d.day}. {MONTHS_DE[d.month - 1]} {d.year}" if lang == "de" else d.strftime("%d %B %Y")
 
 
-def render_cv(content: CVContent, prof: CVProfile, style: dict, path: Path, compact: int = 0) -> Path:
+def render_cv(content: CVContent, prof: CVProfile, style: dict, path: Path, compact: int = 0,
+              photo: Optional[Path] | str = "auto") -> Path:
+    """photo: 'auto' = your setting on My CV (Automatic: German CVs only / Always / Never), or a file, or None."""
+    if photo == "auto":
+        from ..cv.service import photo_for
+        photo = photo_for(content.lang)
     b = Builder(style, compact)
     H = HEADINGS.get(content.lang, HEADINGS["en"])
-    b.header_band(prof, content.tagline)
+    b.header_band(prof, content.tagline, photo)
     b.heading(H["summary"])
     b.text(content.summary)
     b.heading(H["skills"])

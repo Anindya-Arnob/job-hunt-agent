@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Check, Download, GitCompare, History, Plus, Star, Trash2, Undo2, Upload, Pencil, Palette } from 'lucide-react'
+import { ArrowDown, ArrowUp, Camera, Check, Download, GitCompare, History, Plus, Star, Trash2, Undo2, Upload, Pencil, Palette } from 'lucide-react'
 import { api, fileUrl, fmtDate } from '../api'
 import { Empty, Modal, ParsedText, PdfPages, useAsync, useToast } from '../ui'
 
@@ -96,6 +96,8 @@ export default function MyCV() {
           </div>))}
       </div>
 
+      <PhotoCard data={cv.data} onChanged={cv.reload} />
+
       <div className="card">
         <div className="card-h"><span className="flex items-center gap-2"><Palette size={16} />Layout template</span>
           <span><input ref={tplRef} type="file" accept=".docx" className="hidden" onChange={(e) => uploadTemplate(e.target.files[0])} />
@@ -146,6 +148,47 @@ export default function MyCV() {
           <p className="text-sm"><b>Move to archive</b> keeps it for 30 days so you can restore it. <b>Delete permanently</b> removes this CV, all {delCv.versions.length} version(s) and the uploaded file now.</p>
           <p className="mt-2 text-xs muted">Tailored CVs already built from it are not touched.</p>
         </Modal>)}
+    </div>
+  )
+}
+
+// -------------------------------------------------------------- photo ---
+const PHOTO_MODES = [
+  ['auto', 'Automatic: German CVs only', 'German CVs get your photo, English CVs do not. Many German employers still expect one; international companies and English ads usually prefer none.'],
+  ['always', 'Always', 'Every CV gets your photo, in any language.'],
+  ['never', 'Never', 'No CV gets a photo. Fully accepted in Germany too.'],
+]
+
+function PhotoCard({ data, onChanged }) {
+  const toast = useToast()
+  const ref = useRef()
+  const [bust, setBust] = useState(Date.now())
+  const [mode, setMode] = useState(data.cv_photo || 'auto')
+  const upload = async (f) => {
+    if (!f) return
+    try { await api.upload('/api/cv/photo', f); setBust(Date.now()); toast('Photo saved'); onChanged() } catch (e) { toast(e.message, 'error') }
+  }
+  const remove = async () => { await api.del('/api/cv/photo'); toast('Photo removed'); onChanged() }
+  const setM = async (v) => { setMode(v); await api.put('/api/settings', { cv_photo: v }); toast('Saved') }
+  return (
+    <div className="card" data-testid="photo-card">
+      <div className="card-h"><span className="flex items-center gap-2"><Camera size={16} />Photo</span>
+        <span className="flex gap-2"><input ref={ref} type="file" accept="image/*" className="hidden" onChange={(e) => { upload(e.target.files[0]); e.target.value = '' }} />
+          <button className="btn-outline" onClick={() => ref.current.click()}><Upload size={14} />{data.has_photo ? 'Replace photo' : 'Upload photo'}</button>
+          {data.has_photo && <button className="btn-ghost text-rose-600" onClick={remove}><Trash2 size={14} />Remove</button>}</span></div>
+      <div className="flex flex-wrap items-start gap-5 p-4 text-sm">
+        {data.has_photo
+          ? <img src={`/api/cv/photo?t=${bust}`} alt="Your CV photo" className="h-32 w-24 rounded border border-slate-200 object-cover" />
+          : <div className="flex h-32 w-24 items-center justify-center rounded border-2 border-dashed border-slate-300 text-center text-xs muted">No photo</div>}
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="label">Put the photo on the CV</div>
+          {PHOTO_MODES.map(([v, l, help]) => (
+            <label key={v} className="flex cursor-pointer items-start gap-2">
+              <input type="radio" name="cv_photo" className="mt-1" checked={mode === v} onChange={() => setM(v)} />
+              <span><span className="font-medium">{l}</span><span className="block text-xs muted">{help}</span></span></label>))}
+          <p className="text-xs muted">Upload it once: it is cut to the usual 3:4 application size. Templates without a photo area leave it out.</p>
+        </div>
+      </div>
     </div>
   )
 }

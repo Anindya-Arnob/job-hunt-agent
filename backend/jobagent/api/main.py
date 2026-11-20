@@ -1372,7 +1372,36 @@ def cv_list():
     out = cvs.list_profiles()
     main = cvs.get_main()
     return {"profiles": out, "main": main[0].model_dump() if main else None,
-            "main_version_id": main[1] if main else None, "style": cvs.active_style()}
+            "main_version_id": main[1] if main else None, "style": cvs.active_style(),
+            "has_photo": cvs.photo_path().exists(), "cv_photo": settings.cv_photo}
+
+
+# (before /api/cv/{pid}, which would take 'photo' as a CV id)
+@app.post("/api/cv/photo")
+async def cv_photo_upload(file: UploadFile = File(...)):
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / Path(file.filename or "photo.jpg").name
+        with open(tmp, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        try:
+            await asyncio.to_thread(cvs.set_photo, tmp)
+        except cvs.CVError as e:
+            _err(e)
+    return {"ok": True, "has_photo": True}
+
+
+@app.get("/api/cv/photo")
+def cv_photo_get():
+    p = cvs.photo_path()
+    if not p.exists():
+        raise HTTPException(404, "No photo yet")
+    return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.delete("/api/cv/photo")
+def cv_photo_delete():
+    cvs.delete_photo()
+    return {"ok": True, "has_photo": False}
 
 
 @app.post("/api/cv/upload")

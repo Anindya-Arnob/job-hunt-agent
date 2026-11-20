@@ -344,6 +344,46 @@ def set_template(path: Path, name: str = "Uploaded template") -> dict:
     return style
 
 
+# ------------------------------------------------------------------- photo ---
+PHOTO_SIZE = (360, 480)          # 3:4 portrait, the usual German application photo shape
+
+
+def photo_path() -> Path:
+    return Path(settings.data_dir) / "photo.jpg"
+
+
+def set_photo(src: Path) -> Path:
+    """Your photo, once: turned upright, cut to 3:4 around the centre (a little towards the top, where the
+    face usually is) and saved small."""
+    from PIL import Image, ImageOps
+    try:
+        im = ImageOps.exif_transpose(Image.open(src)).convert("RGB")
+    except Exception as e:
+        raise CVError(f"This is not a picture the app can read ({e.__class__.__name__}). Use a JPG or PNG.")
+    w, h = im.size
+    tw, th = (w, w * 4 // 3) if w * 4 // 3 <= h else (h * 3 // 4, h)
+    left = (w - tw) // 2
+    top = min(max(0, (h - th) // 4), h - th)
+    im = im.crop((left, top, left + tw, top + th)).resize(PHOTO_SIZE, Image.LANCZOS)
+    dest = photo_path()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    im.save(dest, "JPEG", quality=88)
+    return dest
+
+
+def delete_photo() -> None:
+    photo_path().unlink(missing_ok=True)
+
+
+def photo_for(lang: str) -> Optional[Path]:
+    """The photo for a CV in this language: Automatic = German CVs only, or Always / Never (My CV)."""
+    p = photo_path()
+    mode = (settings.cv_photo or "auto").lower()
+    if not p.exists() or mode == "never":
+        return None
+    return p if mode == "always" or lang == "de" else None
+
+
 def active_style() -> dict:
     with db.session_scope() as s:
         t = s.exec(select(m.Template).where(m.Template.is_active == True)).first()  # noqa: E712
