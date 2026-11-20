@@ -72,11 +72,12 @@ with sync_playwright() as p:
     expect(page.locator("img[alt='page 1']").first).to_be_visible(timeout=60000)
     # typing in a list field keeps every key: Enter starts a new bullet, the space after a word stays
     box = page.locator("label", has_text="Bullets (one per line)").locator("textarea").first
-    box.click(); box.press("End"); box.press("Control+End")
+    to_end = "el => { el.focus(); el.setSelectionRange(el.value.length, el.value.length) }"   # (End keys differ on a Mac)
+    box.evaluate(to_end)
     box.press_sequentially("\nBuilt a new thing with Python ", delay=15)
     assert box.input_value().endswith("\nBuilt a new thing with Python "), repr(box.input_value()[-60:])
     sk = page.locator("label", has_text="Items (· separated)").locator("input").first
-    sk.press("End"); sk.press_sequentially(" · New Tool", delay=15)
+    sk.evaluate(to_end); sk.press_sequentially(" · New Tool", delay=15)
     assert sk.input_value().endswith(" · New Tool"), sk.input_value()
     page.get_by_placeholder("What changed?").fill("UI test edit")
     page.wait_for_timeout(1500)

@@ -1,0 +1,110 @@
+# Builds the Windows installer (JobHuntAgentSetup.exe) and tests it on a real Windows machine exactly as a new
+# user would: install without admin, start the app, install a newer copy on top (data kept), uninstall (data
+# kept). A tag like v1.2.0 also publishes the installer as a GitHub release, so anyone can download it from
+# https://github.com/Anindya-Arnob/job-hunt-agent/releases/latest
+name: Windows installer
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      JHA_NO_CLAUDE: "1"          # Claude Code is installed for real users; the test does not need it
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.0.0-dev.${{ github.run_number }}" }
+          & $iscc /Qp "/DAppVersion=$v" installer\JobHuntAgent.iss
+          if ($LASTEXITCODE) { exit 1 }
+          Get-Item installer\Output\JobHuntAgentSetup.exe | Format-List Name, Length
+
+      - name: Install it (no admin), like a new user
+        shell: pwsh
+        run: |
+          $p = Start-Process installer\Output\JobHuntAgentSetup.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/TASKS=desktopicon","/LOG=$env:RUNNER_TEMP\setup.log" -Wait -PassThru
+          $app = "$env:LOCALAPPDATA\JobHuntAgent"
+          Get-Content "$app\data\install-log.txt" -Tail 30
+          if ($p.ExitCode) { Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 40; exit $p.ExitCode }
+          foreach ($f in ".venv\Scripts\python.exe", "backend\jobagent\__main__.py", "frontend\dist\index.html", "scripts\start.bat", ".env", "unins000.exe") {
+            if (-not (Test-Path "$app\$f")) { throw "missing after install: $f" }
+          }
+          if (-not (Select-String -Path "$app\data\install-log.txt" -Pattern "OK - Job Hunt Agent is ready" -Quiet)) { throw "setup did not finish" }
+          foreach ($l in "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Job Hunt Agent.lnk", "$([Environment]::GetFolderPath('Desktop'))\Job Hunt Agent.lnk") {
+            if (-not (Test-Path $l)) { throw "missing shortcut: $l" }
+          }
+          $s = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\Job Hunt Agent.lnk")
+          "shortcut -> $($s.TargetPath), icon $($s.IconLocation)"
+          if ($s.IconLocation -notlike "*job-hunt-agent.ico*") { throw "the shortcut has no app icon" }
+
+      - name: Start the app and check it answers
+        shell: pwsh
+        run: |
+          $app = "$env:LOCALAPPDATA\JobHuntAgent"
+          $proc = Start-Process "$app\.venv\Scripts\python.exe" -ArgumentList "-m","jobagent","--no-browser" -WorkingDirectory "$app\backend" -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\app.log" -RedirectStandardError "$env:RUNNER_TEMP\app.err"
+          $ok = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            try { $r = Invoke-RestMethod http://127.0.0.1:8780/api/status; $ok = $true; break } catch { Start-Sleep 1 }
+          }
+          if (-not $ok) { Get-Content "$env:RUNNER_TEMP\app.err" -Tail 40; throw "the app did not start" }
+          $r | ConvertTo-Json -Depth 2 | Select-Object -First 20
+          $html = (Invoke-WebRequest http://127.0.0.1:8780/ -UseBasicParsing).Content
+          if ($html -notmatch "Job Hunt Agent") { throw "the app page did not load" }
+          $t = Invoke-RestMethod http://127.0.0.1:8780/api/cv/templates
+          if ($t.templates.Count -ne 10) { throw "expected 10 CV templates" }
+          "data" | Out-File "$app\data\my-marker.txt"
+          Copy-Item "$app\.env" "$env:RUNNER_TEMP\env.before"
+
+      - name: Install a newer copy on top (your data and settings stay)
+        shell: pwsh
+        run: |
+          $p = Start-Process installer\Output\JobHuntAgentSetup.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER" -Wait -PassThru
+          if ($p.ExitCode) { exit $p.ExitCode }
+          $app = "$env:LOCALAPPDATA\JobHuntAgent"
+          if (-not (Test-Path "$app\data\my-marker.txt")) { throw "the update removed your data" }
+          if ((Get-FileHash "$app\.env").Hash -ne (Get-FileHash "$env:RUNNER_TEMP\env.before").Hash) { throw "the update changed your .env" }
+          for ($i = 0; $i -lt 90; $i++) { try { Invoke-RestMethod http://127.0.0.1:8780/api/status | Out-Null; Start-Sleep 1 } catch { break } }
+          "the running copy was closed for the update"
+
+      - name: Uninstall (your data stays)
+        shell: pwsh
+        run: |
+          $app = "$env:LOCALAPPDATA\JobHuntAgent"
+          $p = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          Start-Sleep 3
+          if (Test-Path "$app\.venv") { throw ".venv left behind" }
+          if (Test-Path "$app\backend") { throw "app files left behind" }
+          if (-not (Test-Path "$app\data\my-marker.txt")) { throw "uninstall removed your data" }
+          if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Job Hunt Agent.lnk") { throw "Start menu entry left" }
+          "uninstalled; data kept"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JobHuntAgentSetup
+          path: installer/Output/JobHuntAgentSetup.exe
+
+      - name: Publish the release (tags only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/JobHuntAgentSetup.exe
+          name: Job Hunt Agent ${{ github.ref_name }}
+          body: |
+            **Windows:** download `JobHuntAgentSetup.exe` below and double-click it. No admin rights needed.
+            The first start sets up Python and everything else (5-10 minutes). Installing a newer version on top keeps your data.
+            Windows may show "Windows protected your PC" because the file is not signed by a paid publisher: click **More info → Run anyway**.
+
+            **Mac / Linux:** `curl -fsSL https://raw.githubusercontent.com/Anindya-Arnob/job-hunt-agent/main/scripts/setup.sh | bash`

@@ -12,8 +12,10 @@ If someone asks you to install or set up this project for them, follow this. The
   ```
   Or, inside a clone: `./scripts/setup.sh`. Running it again updates the app and keeps `data/`, `.env` and documents.
   The app is installed to `~/JobHuntAgent` (override with `JHA_HOME=...`). Set `JHA_NO_START=1` to skip starting it.
-- **Windows:** install Python 3.12 from python.org (tick "Add python.exe to PATH"), then double-click
-  `scripts\install.bat`, then `scripts\start.bat`. Claude Code: `irm https://claude.ai/install.ps1 | iex` in PowerShell.
+- **Windows:** download `JobHuntAgentSetup.exe` from https://github.com/Anindya-Arnob/job-hunt-agent/releases/latest
+  and double-click it (no admin; it installs Python via uv, the packages, Chromium and Claude Code, and makes
+  Start menu / Desktop icons). From a clone instead: Python 3.12 from python.org, then `scripts\install.bat`
+  and `scripts\start.bat`.
 
 The app runs at http://127.0.0.1:8780 and opens in the browser.
 

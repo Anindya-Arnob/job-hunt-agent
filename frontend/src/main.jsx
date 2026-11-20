@@ -85,7 +85,7 @@ function Sidebar() {
   return (
     <aside className="glass relative z-10 m-3 mr-0 flex w-[236px] shrink-0 flex-col rounded-[26px]">
       <div className="flex items-center gap-3 px-4 pb-4 pt-5">
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-blue-400 to-teal-500 text-white shadow-glow">
+        <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[#5B9BFF] to-[#2563EB] text-white shadow-glow">
           <BriefcaseBusiness size={18} />
         </div>
         <div className="min-w-0">
