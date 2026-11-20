@@ -89,7 +89,7 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
-    MsgBox('Job Hunt Agent is removed. Your data and settings are kept in' + #13#10 + ExpandConstant('{app}') +
-           #13#10 + '(folders "data" and the file ".env"). Delete that folder yourself if you no longer need them.',
-           mbInformation, MB_OK);
+    // (no line may start with "#": that is a preprocessor directive)
+    MsgBox('Job Hunt Agent is removed. Your data and settings are kept in ' + ExpandConstant('{app}') + ' (the "data" ' +
+           'folder and the file ".env"). Delete that folder yourself if you no longer need them.', mbInformation, MB_OK);
 end;
