@@ -40,8 +40,20 @@ def find_soffice() -> str | None:
 
 def word_available() -> bool:
     """Microsoft Word can make the PDF instead of LibreOffice (Windows, or a Mac with Word installed)."""
-    if sys.platform == "win32":
-        return True
+    if sys.platform == "win32":          # Word registers itself here (any Office version, also Click-to-Run)
+        try:
+            import winreg
+            for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                try:
+                    winreg.CloseKey(winreg.OpenKey(hive, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe"))
+                    return True
+                except OSError:
+                    continue
+        except ImportError:
+            return True
+        import glob
+        roots = [os.environ.get("ProgramFiles", r"C:\Program Files"), os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")]
+        return any(glob.glob(os.path.join(r, "Microsoft Office", "**", "WINWORD.EXE"), recursive=True) for r in roots)
     return sys.platform == "darwin" and any(os.path.exists(p) for p in MAC_WORD)
 
 
