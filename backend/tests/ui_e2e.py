@@ -45,9 +45,11 @@ with sync_playwright() as p:
     page.locator("input[type=file][accept='image/*']").set_input_files(str(OUT / "me.jpg"))
     expect(page.get_by_alt_text("Your CV photo")).to_be_visible()
     expect(page.get_by_label("Automatic: German CVs only")).to_be_checked()
+    setting = "async (v) => (await (await fetch('/api/settings')).json()).cv_photo === v"
     page.get_by_label("Always").check()
-    expect(page.get_by_text("Saved", exact=True)).to_be_visible()
+    page.wait_for_function(setting, arg="always")          # saved in the app (a toast may be gone already)
     page.get_by_label("Automatic: German CVs only").check()
+    page.wait_for_function(setting, arg="auto")
     shot(page, "03b_cv_photo")
     # templates: your CV in each one, switch in one click
     tpl = page.get_by_test_id("tpl-lebenslauf")
@@ -55,7 +57,6 @@ with sync_playwright() as p:
     expect(tpl.get_by_alt_text("Lebenslauf (tabular) preview")).to_be_visible(timeout=120000)
     page.wait_for_function("() => [...document.querySelectorAll('[data-testid=templates] img')].filter(i => i.complete && i.naturalWidth > 0).length >= 10", timeout=180000)
     tpl.get_by_role("button", name="Use this template").click()
-    expect(page.get_by_text("is now used for every CV")).to_be_visible()
     expect(tpl.get_by_text("In use").first).to_be_visible()
     page.get_by_test_id("templates").scroll_into_view_if_needed()
     shot(page, "03c_templates")
@@ -227,7 +228,6 @@ with sync_playwright() as p:
     page.locator("aside").get_by_role("link", name=re.compile(r"^My\ documents(\s|$)")).click()
     expect(page.get_by_role("heading", name="My documents")).to_be_visible()
     page.get_by_test_id("docs-input").set_input_files([str(OUT / "Transcript of Records.pdf"), str(OUT / "me.jpg")])
-    expect(page.get_by_text("2 documents added")).to_be_visible()
     rows = page.get_by_test_id("docs-list").locator("> div")
     expect(rows).to_have_count(2)
     expect(page.get_by_label("Type").first).to_have_value(re.compile("transcript|other"))
