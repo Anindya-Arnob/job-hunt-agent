@@ -1,6 +1,6 @@
 # Builds the Windows installer (JobHuntAgentSetup.exe) and tests it on a real Windows machine exactly as a new
 # user would: install without admin, start the app, install a newer copy on top (data kept), uninstall (data
-# kept). A tag like v1.2.0 also publishes the installer as a GitHub release, so anyone can download it from
+# kept). A tag like v1.2.0 (or a release made on GitHub) also publishes the installer with that release, so anyone can download it from
 # https://github.com/Anindya-Arnob/job-hunt-agent/releases/latest
 name: Windows installer
 
@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  release:
+    types: [published]          # a release made on GitHub gets the installer attached
   workflow_dispatch:
 
 permissions:
