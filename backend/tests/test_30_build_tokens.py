@@ -235,8 +235,9 @@ def test_letter_language_is_your_choice_and_english_by_default(monkeypatch):
     assert "LETTER LANGUAGE: English" in seen["user"] and "Same language as the job ad" not in seen["system"]
     assert "I am happy to discuss a start date." in seen["user"]          # full-time: no 'working student' line
     monkeypatch.setattr(settings, "letter_language", "ad")
+    job.lang = W.doc_language(job)[0]           # the build decides once per job, for the CV and the letter
     W.write_letter(job, prof, cv)
-    assert "LETTER LANGUAGE: the language of the job ad" in seen["user"]
+    assert "LETTER LANGUAGE: German" in seen["user"]          # 'same as the job ad' and this ad is German
     del CVS
 
 

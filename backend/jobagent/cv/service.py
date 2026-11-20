@@ -283,7 +283,10 @@ def numbers_in(text: str) -> set[str]:
     out = set()
     for m_ in NUM_RE.finditer(text or ""):
         n = m_.group(0).strip().lstrip("~").rstrip(".,")
-        core = re.sub(r"[^\d.]", "", n).strip(".")
+        # "1,5" (German) and "1.5", "10.000" and "10,000" are the same number on a German and an English CV:
+        # a separator before exactly 3 digits groups thousands, any other one is the decimal point
+        core = re.sub(r"[^\d.,]", "", n).strip(".,")
+        core = re.sub(r"[.,](?=\d{3}(?:[.,]|$))", "", core).replace(",", ".")
         if not core:
             continue
         out.add(core)

@@ -33,7 +33,8 @@ TITLE_STOP = {
 }
 WEAK_START = re.compile(r"^(responsible for|worked on|helped|assisted|participated in|involved in|tasked with|"
                         r"duties included|was part of)\b", re.I)
-FIRST_PERSON = re.compile(r"(?<![A-Za-z/.-])(I|I'm|I've|my|My|me|myself)(?![A-Za-z'/.-])")
+FIRST_PERSON = re.compile(r"(?<![A-Za-zäöüß/.-])(I|I'm|I've|my|My|me|myself|[Ii]ch|[Mm]ein|[Mm]eine[mnrs]?|mich|mir)"
+                          r"(?![A-Za-zäöüß'/.-])")
 LANGS = {"german": ("german", "deutsch"), "english": ("english", "englisch"), "french": ("french", "französisch"),
          "spanish": ("spanish", "spanisch")}
 

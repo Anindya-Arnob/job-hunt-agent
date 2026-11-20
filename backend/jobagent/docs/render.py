@@ -330,37 +330,54 @@ class Builder:
 
 
 # ------------------------------------------------------------------- CV ---
+HEADINGS = {
+    "en": {"summary": "Professional Summary", "skills": "Technical Skills", "experience": "Experience",
+           "projects": "Projects", "education": "Education", "certifications": "Certifications",
+           "languages": "Languages", "certificate": "Certificate"},
+    "de": {"summary": "Profil", "skills": "Kenntnisse", "experience": "Berufserfahrung", "projects": "Projekte",
+           "education": "Ausbildung", "certifications": "Zertifikate", "languages": "Sprachen",
+           "certificate": "Zertifikat"},
+}
+MONTHS_DE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+             "November", "Dezember"]
+
+
+def letter_date(d: date, lang: str = "en") -> str:
+    return f"{d.day}. {MONTHS_DE[d.month - 1]} {d.year}" if lang == "de" else d.strftime("%d %B %Y")
+
+
 def render_cv(content: CVContent, prof: CVProfile, style: dict, path: Path, compact: int = 0) -> Path:
     b = Builder(style, compact)
+    H = HEADINGS.get(content.lang, HEADINGS["en"])
     b.header_band(prof, content.tagline)
-    b.heading("Professional Summary")
+    b.heading(H["summary"])
     b.text(content.summary)
-    b.heading("Technical Skills")
+    b.heading(H["skills"])
     b.skills_table(content.skills)
     if content.experience:
-        b.heading("Experience")
+        b.heading(H["experience"])
         for e in content.experience:
             org = " · ".join(x for x in (tidy(e.org), tidy(e.meta)) if x)
             b.title_line(e.title, org, e.dates)
             b.stack(e.stack)
             b.bullets(e.bullets)
-    b.heading("Projects")
+    b.heading(H["projects"])
     for pr in content.projects:
         b.title_line(tidy_name(pr.name), "", pr.dates, link=("GitHub", pr.link) if pr.link else None, note=pr.note)
         b.stack(pr.stack)
         b.bullets(pr.bullets)
-    b.heading("Education")
+    b.heading(H["education"])
     for ed in content.education:
         b.title_line(tidy_name(ed.degree), tidy(ed.school), ed.dates)
         b.bullets(ed.bullets)
     if content.certifications:
-        b.heading("Certifications")
+        b.heading(H["certifications"])
         for c in content.certifications:
             b.title_line(" – ".join(x for x in (c.name, c.issuer.split("|")[0].strip()) if x), "", c.dates,
-                         link=("Certificate", c.link) if c.link else None)
+                         link=(H["certificate"], c.link) if c.link else None)
             b.bullets(c.bullets)
     if content.languages:
-        b.heading("Languages")
+        b.heading(H["languages"])
         b.text("   |   ".join(f"{l.language}: {l.level}" for l in content.languages))
     return b.save(path)
 
@@ -374,12 +391,13 @@ def render_letter(letter: LetterContent, prof: CVProfile, tagline: str, style: d
     f = style["font"]
     p = b.p(WD_ALIGN_PARAGRAPH.RIGHT)
     _spacing(p, 16, 10)
-    _run(p, f"{prof.contact.location}, {(today or date.today()).strftime('%d %B %Y')}".strip(", "), size,
+    _run(p, f"{prof.contact.location}, {letter_date(today or date.today(), letter.lang)}".strip(", "), size,
          style["muted"], font=f)
     if letter.recipient or company:
         p = b.p()
         _spacing(p, 0, 8)
-        _run(p, letter.recipient or f"Hiring Team, {company}", size, style["text"], font=f)
+        _run(p, letter.recipient or (f"Personalabteilung, {company}" if letter.lang == "de" else f"Hiring Team, {company}"),
+             size, style["text"], font=f)
     p = b.p()
     _spacing(p, 0, 10)
     _run(p, letter.subject, size + 0.5, style["navy"], bold=True, font=f)

@@ -181,9 +181,14 @@ def write_cv(job: JobForWriting, prof: CVProfile, issues: Optional[list[str]] = 
     # (availability is never part of the CV: it goes in the cover letter)
     from ..docs.ats import core_title
     extra += f"\n\nTARGET ROLE WORDS for the tagline: {core_title(job.title) or job.title}"
+    extra += f"\n\n{cv_language_line(job.lang)}"
     user = f"MAIN CV (only truth):\n{prof.model_dump_json(exclude={'uncertain_fields'})}\n\n{_job_block(job)}{extra}{fix}"
-    return llm.structured("write_cv", CVContent, system_prompt("write_cv"), user,
-                          fake=lambda: heuristic_cv(job, prof, level, picked, fact), max_tokens=6000)
+    out = llm.structured("write_cv", CVContent, system_prompt("write_cv"), user,
+                         fake=lambda: heuristic_cv(job, prof, level, picked, fact), max_tokens=6000)
+    # headings follow what was really written (the offline writer, without Claude, writes English)
+    text = f"{out.summary} " + " ".join(b for e in [*out.experience, *out.projects] for b in e.bullets)
+    out.lang = "de" if job.lang == "de" and is_german_text(text) else "en"
+    return out
 
 
 def check_cv(job: JobForWriting, prof: CVProfile, cv: CVContent) -> CheckResult:
@@ -224,16 +229,71 @@ def availability_line(job_type: str) -> str:
     return "I am happy to discuss a start date."
 
 
-LETTER_LANGUAGE = {
-    "english": "English. Write in English even when the job ad is in German or another language.",
-    "german": "German.",
-    "ad": "the language of the job ad (German ad -> German letter, English ad -> English letter).",
-}
+# --------------------------------------------------------- language ---
+# One setting for the CV and the letter (Build options): english / german / ad (= same as the job ad, and German
+# also when an English ad needs German, because then a German application is the better one).
+_DE_WORDS = {"und", "der", "die", "das", "wir", "sie", "für", "mit", "von", "ist", "bei", "auf", "zu", "ihre", "deine",
+             "unser", "unsere", "eine", "ein", "im", "oder", "werden", "aufgaben", "profil", "dich", "dein", "ihr", "uns",
+             "nicht", "sind", "auch", "kenntnisse", "erfahrung", "bieten", "suchen", "du", "bist", "hast", "wir", "über",
+             "zur", "zum", "dem", "den", "des", "als", "sowie"}
+_EN_WORDS = {"and", "the", "you", "we", "with", "for", "of", "our", "your", "is", "are", "to", "will", "be", "as",
+             "an", "on", "this", "that", "have", "experience", "skills", "offer"}
+_DE_NEED = re.compile(
+    r"(german|deutsch)[\w\s,/&()-]{0,40}?(required|requirement|mandatory|a must|must|necessary|essential|erforderlich|"
+    r"vorausgesetzt|zwingend|notwendig|fluent|fließend|fliessend|verhandlungssicher|\bc1\b|\bc2\b|\bb2\b|business|"
+    r"native|muttersprach|proficien)|"
+    r"(fluent|fließend|fliessend|proficien\w*|excellent|very good|good|sehr gute?|gute|business|verhandlungssicher|"
+    r"native|strong)[\w\s,/&()-]{0,30}?(german|deutsch)", re.I)
+_DE_PLUS = re.compile(r"(german|deutsch)[\w\s,/&()-]{0,40}?(\bplus\b|nice to have|advantage|bonus|beneficial|"
+                      r"von vorteil|wünschenswert|wuenschenswert|ideally|preferred|desirable)", re.I)
 
 
-def letter_language_line() -> str:
+def is_german_text(text: str) -> bool:
+    words = re.findall(r"[a-zäöüß]+", (text or "").lower())
+    de = sum(w in _DE_WORDS for w in words)
+    en = sum(w in _EN_WORDS for w in words)
+    return de > en and de >= 3
+
+
+def german_needed(text: str) -> bool:
+    """The ad asks for German (or for German and English). 'German is a plus' does not count."""
+    for line in re.split(r"[\n.;•·]+", text or ""):
+        if _DE_NEED.search(line) and not _DE_PLUS.search(line):
+            return True
+    return False
+
+
+def doc_language(job: JobForWriting, choice: Optional[str] = None) -> tuple[str, str]:
+    """("en" | "de", why) for the CV and the letter of this job."""
     from ..config import settings
-    return "LETTER LANGUAGE: " + LETTER_LANGUAGE.get((settings.letter_language or "english").lower(), LETTER_LANGUAGE["english"])
+    c = (choice or settings.letter_language or "english").lower()
+    if c == "german":
+        return "de", "you chose German"
+    if c == "ad":
+        text = f"{job.title}\n{job.description}"
+        if is_german_text(text):
+            return "de", "the job ad is in German"
+        if german_needed(text):
+            return "de", "the job ad asks for German"
+        return "en", "the job ad is in English"
+    return "en", "you chose English"
+
+
+def cv_language_line(lang: str) -> str:
+    if lang == "de":
+        return ("CV LANGUAGE: German. Write the tagline, the summary, every bullet, the skill group names, degrees, "
+                "dates (e.g. 'Okt. 2024 – heute') and language levels in natural, professional German, no first "
+                "person. Keep every skill item, stack item, tool and technology name exactly as in the main CV "
+                "(e.g. 'Data Analysis', 'Python' stay as they are), and every number exactly as in the main CV.")
+    return "CV LANGUAGE: English, also when the job ad is in German."
+
+
+def letter_language_line(lang: str = "en") -> str:
+    if lang == "de":
+        return ("LETTER LANGUAGE: German, formal 'Sie'. Recipient 'Personalabteilung, <company>' unless a contact person "
+                "is named; greeting 'Sehr geehrte Damen und Herren,' unless a contact person is named; closing "
+                "'Mit freundlichen Grüßen'. Translate the availability sentence into German.")
+    return "LETTER LANGUAGE: English. Write in English even when the job ad is in German or another language."
 
 
 def _human_blocker(d: str) -> str:
@@ -318,9 +378,10 @@ def write_letter(job: JobForWriting, prof: CVProfile, cv: CVContent, issues: Opt
             f"TAILORED CV:\n{cv.model_dump_json()}\n\n{_job_block(job)}\n\n"
             f"Availability sentence to use: \"{availability_line(job.job_type)}\""
             + (f"\nAlso say, in one sentence in the last paragraph (keep its facts, no new ones): {fact}" if fact else "")
-            + f"\n\n{letter_language_line()}{fix}")
+            + f"\n\n{letter_language_line(job.lang)}{fix}")
     if not (job.company or "").strip():
         user += "\n\nThe company name is unknown: write 'your team' instead of a company name."
     out = llm.structured("write_letter", LetterContent, system_prompt("write_letter"), user,
                          fake=lambda: heuristic_letter(job, prof, cv), max_tokens=3000)
+    out.lang = "de" if job.lang == "de" and is_german_text(" ".join(out.paragraphs)) else "en"
     return tidy_letter(out, job)

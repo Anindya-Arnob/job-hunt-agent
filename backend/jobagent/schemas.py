@@ -183,6 +183,7 @@ class CVContent(BaseModel):
     education: list[EducationItem]
     certifications: list[CertificationItem] = Field(default_factory=list)
     languages: list[LanguageItem] = Field(default_factory=list)
+    lang: Literal["en", "de"] = Field("en", description="en or de: the language this CV is written in")
 
 
 class CheckResult(BaseModel):
@@ -205,6 +206,7 @@ class LetterContent(BaseModel):
     paragraphs: list[str] = Field(min_length=3, max_length=5)
     closing: str = "Kind regards,"
     blockers_stated: list[str] = Field(default_factory=list, description="Gaps/blockers the letter names honestly")
+    lang: Literal["en", "de"] = Field("en", description="en or de: the language this letter is written in")
 
 
 class JobForWriting(BaseModel):
@@ -218,3 +220,4 @@ class JobForWriting(BaseModel):
     missing_wording: list[str] = Field(default_factory=list)
     missing_skills: list[str] = Field(default_factory=list)
     deal_breakers: list[str] = Field(default_factory=list)
+    lang: Literal["en", "de"] = "en"           # which language the CV and the letter are written in

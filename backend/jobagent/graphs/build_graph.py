@@ -164,6 +164,7 @@ def _writer(state) -> CVProfile:
 def _jw(state, job: m.Job, sc) -> JobForWriting:
     """The job for the writers. A 'missing' skill that your picked GitHub project shows is not missing."""
     jw = job_for_writing(job, sc)
+    jw.lang = W.doc_language(jw)[0]
     if state.get("tprof"):
         from ..docs.ats import hit
         from ..steps.score import profile_text
@@ -286,6 +287,8 @@ def prepare(state: BuildState) -> dict:
         t.summary = (t.summary + " " + fact).strip()      # its numbers (hours, year) are allowed in the CV
     before = ats.score(jw, prof, prof)
     _emit(state, f"ATS score of your main CV for this job: {before['score']}")
+    lang, why = W.doc_language(jw)
+    _emit(state, f"CV and cover letter in {'German' if lang == 'de' else 'English'} ({why})")
     return {"wprof": w.model_dump(), "tprof": t.model_dump(), "picked": [x.as_dict() for x in picked],
             "proj_info": info, "fact": fact, "ats_before": before, "ats_after": {}, "review": None, "reviewed": False}
 
