@@ -209,7 +209,9 @@ class ApplySession:
         ctx = Context(profile=prof, job_type=job.job_type, cv_pdf=docs.get("cv", ""), letter_pdf=docs.get("letter", ""),
                       cv_text=cv_text(), company=job.company, title=strip_gender(job.title), job_text=job.full_description or "")
         from .bridge import letter_text
+        from .. import attachments
         ctx.letter_text = letter_text(job.id)
+        ctx.extra = attachments.for_applying()
         ctx.answerer = make_batch_answerer(ctx)
         ctx.drafter = None if ctx.answerer else make_drafter(ctx)
         return ctx

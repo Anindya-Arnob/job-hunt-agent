@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -1568,6 +1568,63 @@ async def cv_template(file: UploadFile = File(...)):
         with open(tmp, "wb") as f:
             shutil.copyfileobj(file.file, f)
         return {"style": cvs.set_template(tmp, name=tmp.name)}
+
+
+# -------------------------------------------------------------- my documents ---
+@app.get("/api/attachments")
+def attachments_list():
+    from .. import attachments as A
+    return {"items": A.listing(), "kinds": [{"value": k, "label": v[0]} for k, v in A.KINDS.items()]}
+
+
+@app.post("/api/attachments")
+async def attachments_add(file: UploadFile = File(...), name: str = Form(""), kind: str = Form(""), issued: str = Form("")):
+    from .. import attachments as A
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / Path(file.filename or "document.pdf").name
+        with open(tmp, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        try:
+            return await asyncio.to_thread(A.add, tmp, name, kind, issued)
+        except A.AttachmentError as e:
+            _err(e)
+
+
+class AttachmentIn(BaseModel):
+    name: Optional[str] = None
+    kind: Optional[str] = None
+    issued: Optional[str] = None
+    use: Optional[bool] = None
+
+
+@app.put("/api/attachments/{aid}")
+def attachments_update(aid: int, body: AttachmentIn):
+    from .. import attachments as A
+    try:
+        return A.update(aid, **body.model_dump())
+    except A.AttachmentError as e:
+        _err(e, 404)
+
+
+@app.delete("/api/attachments/{aid}")
+def attachments_delete(aid: int):
+    from .. import attachments as A
+    A.delete(aid)
+    return {"ok": True}
+
+
+@app.get("/api/attachments/{aid}/file")
+def attachments_file(aid: int, download: bool = False):
+    from .. import attachments as A
+    try:
+        p = A.path_of(aid)
+    except A.AttachmentError as e:
+        _err(e, 404)
+    with db.session_scope() as s:
+        a = s.get(m.Attachment, aid)
+        name = a.name or p.stem
+    return FileResponse(p, filename=f"{name}{p.suffix}" if download else None,
+                        content_disposition_type="attachment" if download else "inline")
 
 
 # ------------------------------------------------------------------ settings ---

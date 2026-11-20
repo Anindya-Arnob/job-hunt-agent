@@ -202,6 +202,23 @@ with sync_playwright() as p:
     expect(page.get_by_text("Details saved")).to_be_visible()
     page.wait_for_timeout(500)
     shot(page, "10b_my_details")
+    # My documents: add certificates once, set their type and date
+    from pypdf import PdfWriter
+    w = PdfWriter(); w.add_blank_page(595, 842); w.add_blank_page(595, 842)
+    with open(OUT / "Transcript of Records.pdf", "wb") as fh:
+        w.write(fh)
+    page.locator("aside").get_by_role("link", name=re.compile(r"^My\ documents(\s|$)")).click()
+    expect(page.get_by_role("heading", name="My documents")).to_be_visible()
+    page.get_by_test_id("docs-input").set_input_files([str(OUT / "Transcript of Records.pdf"), str(OUT / "me.jpg")])
+    expect(page.get_by_text("2 documents added")).to_be_visible()
+    rows = page.get_by_test_id("docs-list").locator("> div")
+    expect(rows).to_have_count(2)
+    expect(page.get_by_label("Type").first).to_have_value(re.compile("transcript|other"))
+    page.get_by_label("Issued").first.fill("2025-03")
+    page.get_by_label("Issued").first.blur()
+    page.get_by_label("Type").last.select_option("language")
+    page.wait_for_timeout(600)
+    shot(page, "10c_my_documents")
     page.locator("aside").get_by_role("link", name=re.compile(r"^Apply(\s|$)")).click()
     expect(page.get_by_text("Your jobs with a finished CV")).to_be_visible()
     expect(page.get_by_role("button", name="Apply in my browser")).to_be_visible()

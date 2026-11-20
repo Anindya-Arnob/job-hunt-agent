@@ -138,6 +138,8 @@ def context_for(jid: int) -> tuple[m.Job, Context]:
         _ctx_cache[jid] = ctx
     else:
         _ctx_cache[jid].profile = P.load()          # pick up edits in My details right away
+    from .. import attachments
+    _ctx_cache[jid].extra = attachments.for_applying()     # and documents added on My documents
     return job, _ctx_cache[jid]
 
 
@@ -202,14 +204,16 @@ def decide_fields(jid: int, raw_fields: list[dict]) -> list[dict]:
         d = decisions[f.fid]
         item = {"fid": f.fid, "action": d.action, "value": d.value, "source": d.source, "why": d.why}
         if d.action == "upload" and d.value:
+            kinds = {ctx.cv_pdf: "cv", ctx.letter_pdf: "letter", **{v: k for k, v in ctx.extra.items()}}
             item["file"] = {"name": Path(d.value).name, "mime": mimetypes.guess_type(d.value)[0] or "application/pdf",
-                            "kind": "letter" if d.value == ctx.letter_pdf else "cv"}
+                            "kind": kinds.get(d.value, "cv")}
         out.append(item)
     return out
 
 
 def file_b64(jid: int, kind: str) -> dict:
-    path = docs_for(jid).get(kind)
+    from .. import attachments
+    path = docs_for(jid).get(kind) or attachments.for_applying().get(kind)
     if not path:
         raise KeyError(kind)
     data = Path(path).read_bytes()

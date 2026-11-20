@@ -107,6 +107,20 @@ class Template(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now)
 
 
+class Attachment(SQLModel, table=True):
+    """Your own documents for applications (certificates, transcripts, ...), uploaded once on My documents."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = ""
+    kind: str = "other"             # see attachments.KINDS
+    issued: str = ""                # "2025-03" or "2025": newest first in the one-PDF application
+    file_path: str = ""
+    original_name: str = ""
+    size: int = 0
+    pages: int = 0
+    use: bool = True                # offered when you apply (Chrome helper, one PDF)
+    created_at: datetime = Field(default_factory=now)
+
+
 class Document(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     job_id: int = Field(index=True)

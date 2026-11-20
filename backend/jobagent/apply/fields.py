@@ -46,6 +46,7 @@ class Context:
     job_type: str = ""              # Working Student / Internship / Part-time
     cv_pdf: str = ""
     letter_pdf: str = ""
+    extra: dict = field(default_factory=dict)   # your documents (My documents): kind -> file, 'all' = merged
     cv_text: str = ""               # your CV as plain text (for yes/no skill questions)
     company: str = ""
     title: str = ""
@@ -217,9 +218,14 @@ def decide(f: Field, ctx: Context, file_index: int = 0) -> Decision:
             return Decision("upload", ctx.letter_pdf, "file") if ctx.letter_pdf else Decision("leave", why="No cover letter file")
         if _has(t, r"resume|résumé|\bcv\b|lebenslauf|curriculum") or file_index == 0:
             return Decision("upload", ctx.cv_pdf, "file") if ctx.cv_pdf else Decision("leave", why="No CV file")
-        if file_index == 1 and ctx.letter_pdf and not _has(t, r"zeugnis|certificate|transcript|other|weitere|sonstige"):
+        from ..attachments import kind_for_field
+        kind = kind_for_field(t)
+        if kind and (ctx.extra.get(kind) or ctx.extra.get("all")):
+            return Decision("upload", ctx.extra.get(kind) or ctx.extra["all"], "file")
+        if file_index == 1 and ctx.letter_pdf and not kind:
             return Decision("upload", ctx.letter_pdf, "file")
-        return Decision("leave", why="Extra document (certificates, transcripts...) - add yourself if you want")
+        return Decision("leave", why="Extra document (certificates, transcripts...) - add it on My documents, "
+                                     "or attach it yourself")
     # --- consent boxes are yours to tick
     if f.type == "checkbox" and _has(t, CONSENT):
         return Decision("consent", why="Consent / privacy box - tick it yourself after reading")

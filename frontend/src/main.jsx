@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Search, Table2, Hammer, FileText, ListChecks, PlugZap, IdCard, Activity, Send, UserRound, Inbox as InboxIcon, Settings as SettingsIcon, Moon, Sun, BriefcaseBusiness, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, Search, Table2, Hammer, FileText, ListChecks, PlugZap, IdCard, Activity, Send, UserRound, Inbox as InboxIcon, Settings as SettingsIcon, Moon, Sun, BriefcaseBusiness, ChevronRight, FolderOpen } from 'lucide-react'
 import 'ag-grid-community/styles/ag-grid.css'
 import 'ag-grid-community/styles/ag-theme-quartz.css'
 import './index.css'
@@ -17,6 +17,7 @@ import Documents from './pages/Documents'
 import Tracker from './pages/Tracker'
 import Connections from './pages/Connections'
 import MyCV from './pages/MyCV'
+import MyDocuments from './pages/MyDocuments'
 import Runs from './pages/Runs'
 import Settings from './pages/Settings'
 import Apply from './pages/Apply'
@@ -37,6 +38,7 @@ const NAV = [
   { section: 'Setup' },
   { to: '/connections', label: 'Connections', icon: PlugZap },
   { to: '/cv', label: 'My CV', icon: IdCard },
+  { to: '/mydocs', label: 'My documents', icon: FolderOpen },
   { to: '/details', label: 'My details', icon: UserRound },
   { to: '/runs', label: 'Runs & coverage', icon: Activity },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
@@ -158,6 +160,7 @@ function App() {
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/connections" element={<Connections />} />
             <Route path="/cv" element={<MyCV />} />
+            <Route path="/mydocs" element={<MyDocuments />} />
             <Route path="/runs" element={<Runs />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
