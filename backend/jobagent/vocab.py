@@ -51,6 +51,103 @@ SYNONYMS = {
     "NLP": ["Natural Language Processing"],
 }
 
+# Skills postings ask for in words, often German: one name (shown, and written on an English CV) -> every way
+# an ad or a CV writes it. "Fehlerbehandlung" in a German ad and "error handling" on an English CV are the
+# same keyword, both when the ad is read and when the CV is checked.
+CONCEPTS = {
+    "Automated Testing": ["automated testing", "automated tests", "automatisierte Tests", "automatisierten Tests",
+                          "automatisiertes Testen", "Testautomatisierung", "test automation", "unit tests",
+                          "unit testing", "Unit-Tests", "integration tests", "pytest", "test-driven development", "TDD"],
+    "Tool Calling": ["tool calling", "tool calls", "function calling", "tool use"],
+    "LLM Orchestration": ["LLM orchestration", "LLM-Orchestrierung", "orchestration of LLMs", "LangGraph",
+                          "agent orchestration"],
+    "Agentic Workflows": ["agentic workflows", "agentic workflow", "agentische Workflows", "agentischen Workflows",
+                          "AI agents", "KI-Agenten", "multi-agent", "Agentic Workflow Automation"],
+    "Error Handling": ["error handling", "Fehlerbehandlung", "exception handling", "retries", "retry logic",
+                       "fault tolerance", "Fehlertoleranz", "fallbacks"],
+    "Monitoring": ["monitoring", "observability", "Überwachung", "alerting", "progress monitoring", "run logs"],
+    "Security": ["security", "Sicherheit", "IT-Sicherheit", "Datensicherheit", "secure coding", "authentication"],
+    "Cost Control": ["cost control", "Kostenkontrolle", "cost optimization", "Kostenoptimierung", "budget cap",
+                     "token tracking", "token budget"],
+    "Performance": ["performance", "performance optimization", "Performanceoptimierung", "Performance-Optimierung", "latency",
+                    "Latenz", "performance tuning"],
+    "Backend Development": ["backend", "back-end", "Backend-Services", "backend services", "Backend-Entwicklung",
+                            "backend development", "server-side"],
+    "APIs": ["APIs", "API", "REST APIs", "RESTful APIs", "REST API", "Schnittstellen", "API integration",
+             "FastAPI"],
+    "Integrations": ["integrations", "Integrationen", "system integration", "API integration"],
+    "Software Engineering": ["software engineering", "Softwareentwicklung", "software development",
+                             "Software-Engineering", "Software-Engineering-Praktiken"],
+    "Customer Collaboration": ["customer collaboration", "Zusammenarbeit mit Kunden", "Kundenkontakt",
+                               "client-facing", "customer-facing", "stakeholder management", "Kundenprojekte",
+                               "working with customers", "working with clients"],
+    "Business Process Analysis": ["business process analysis", "business processes", "Geschäftsprozesse",
+                                  "Geschäftsprozessen", "Prozessanalyse", "process analysis", "requirements analysis",
+                                  "Anforderungsanalyse"],
+    "Data Structures": ["data structures", "Datenstrukturen", "data modeling", "Datenmodellierung"],
+    "Production Deployment": ["production", "in production", "produktiven Einsatz", "Produktivbetrieb",
+                              "production-grade", "produktionsreif", "produktionsreife", "produktionsreifen",
+                              "deployment", "deployed"],
+    "Artificial Intelligence": ["artificial intelligence", "KI", "künstliche Intelligenz", "AI"],
+    "Machine Learning": ["machine learning", "maschinelles Lernen", "ML"],
+    "Data Analysis": ["data analysis", "Datenanalyse", "data analytics", "Datenauswertung"],
+    "Agile": ["agile", "Scrum", "Kanban", "agil", "agilen", "agiles Arbeiten"],
+    "Communication Skills": ["communication skills", "Kommunikationsfähigkeit", "Kommunikationsstärke",
+                             "kommunikationsstark"],
+    "Analytical Skills": ["analytical skills", "Analysefähigkeit", "analytische Fähigkeiten", "analytisches Denken",
+                          "strukturierte Analysefähigkeit"],
+    "Teamwork": ["teamwork", "team player", "Teamfähigkeit", "Teamplayer"],
+    "Documentation": ["documentation", "Dokumentation", "technical documentation"],
+    "Microservices": ["microservices", "Microservice-Architektur"],
+    "Cloud Computing": ["cloud computing", "cloud", "Cloud-Plattformen"],
+}
+_CONCEPT_OF = {}
+for _c, _vs in CONCEPTS.items():
+    for _v in [_c, *_vs]:
+        _CONCEPT_OF.setdefault(_v.lower(), _c)
+
+
+def concept_of(term: str) -> str:
+    """The shared name of a concept ('Fehlerbehandlung' -> 'Error Handling'), or '' when it is not one."""
+    return _CONCEPT_OF.get((term or "").lower(), "")
+
+
+_SKILL_SET = {x.lower() for x in SKILLS}
+
+
+def variants(term: str) -> list[str]:
+    """Every way of writing this keyword (the term itself first). A tool asked for by name (LangGraph, FastAPI,
+    pytest) stays itself: only the concept's own name stands for all of its forms."""
+    c = concept_of(term)
+    if not c or (term.lower() != c.lower() and term.lower() in _SKILL_SET):
+        return [term]
+    return list(dict.fromkeys([term, c, *CONCEPTS[c]]))
+
+
+def concept_key(term: str) -> str:
+    """One key per keyword: the concept for its forms, the tool itself for tools."""
+    c = concept_of(term)
+    if not c or (term.lower() != c.lower() and term.lower() in _SKILL_SET):
+        return term.lower()
+    return c.lower()
+
+
+def find_concepts(text: str) -> list[str]:
+    """Concepts an ad (or a CV) names in any of their forms. Short forms (AI, KI, ML, API) only count with
+    their capitals, so 'ai' or 'ml' inside other words or URLs do not."""
+    out = []
+    for c, vs in CONCEPTS.items():
+        for v in [c, *vs]:
+            if len(v) <= 3:
+                if re.search(rf"(?<![A-Za-z0-9+#]){re.escape(v)}(?![A-Za-z0-9+#])", text or ""):
+                    out.append(c)
+                    break
+            elif term_regex(v).search(text or ""):
+                out.append(c)
+                break
+    return out
+
+
 ALL_TERMS = list(dict.fromkeys(SKILLS + [a for alts in SYNONYMS.values() for a in alts
                                          if a not in ("APIs", "evaluation", "containers", "pandas")]))
 

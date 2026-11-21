@@ -100,7 +100,7 @@ class Settings:
     github_projects: bool = field(default_factory=lambda: _env("GITHUB_PROJECTS", "true").lower() == "true")
     github_user: str = field(default_factory=lambda: _env("GITHUB_USER", ""))    # empty = the GitHub link on your CV
     github_token: str = field(default_factory=lambda: _env("JOBHUNT_GITHUB_TOKEN", ""))  # optional: private repos, higher limit
-    ats_target: int = field(default_factory=lambda: int(_env("ATS_TARGET", "75")))
+    ats_target: int = field(default_factory=lambda: int(_env("ATS_TARGET", "80")))
     recruiter_review: bool = field(default_factory=lambda: _env("RECRUITER_REVIEW", "true").lower() == "true")
     humanize: bool = field(default_factory=lambda: _env("HUMANIZE", "true").lower() == "true")
     state_availability: bool = field(default_factory=lambda: _env("STATE_AVAILABILITY", "false").lower() == "true")

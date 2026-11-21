@@ -15,6 +15,9 @@ export function AtsBadge({ ats }) {
 const PARTS = [['keywords', 'Keywords', 60], ['title', 'Job title', 10], ['sections', 'Sections', 10], ['contact', 'Contact', 10],
   ['results', 'Numbers', 5], ['languages', 'Languages', 5]]
 
+// "Keywords" is out of 60: 45 for having the ad's words anywhere + 15 for having them up front (profile, skills)
+const part = (a, k) => (k === 'keywords' ? (a.parts?.keywords || 0) + (a.parts?.upfront || 0) : a.parts?.[k] || 0)
+
 export default function AtsPanel({ ats, projects, review }) {
   if (!ats?.after) return null
   const { before = {}, after, target = 75 } = ats
@@ -27,11 +30,17 @@ export default function AtsPanel({ ats, projects, review }) {
         <Score label="Tailored" value={after.score} target={target} big />
         <div className="ml-auto pb-1 text-right text-xs muted">target {target}<br />{after.score - (before.score || 0) >= 0 ? '+' : ''}{after.score - (before.score || 0)} points</div>
       </div>
+      {after.knockouts?.length > 0 && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800" data-testid="ats-knockout">
+          <b>Knock-out:</b> {after.knockouts.join('; ')}. No wording fixes this; many portals filter on it before anyone reads the CV.</div>)}
+      {after.few_keywords && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="ats-few">
+          Only {after.n_keywords} keywords found in this ad, so this score says little. Read the ad yourself too.</div>)}
       <div className="grid grid-cols-3 gap-x-3 gap-y-1.5">
         {PARTS.map(([k, l, max]) => (
           <div key={k}>
-            <div className="flex justify-between text-[11px] muted"><span>{l}</span><span className="tabular-nums">{after.parts?.[k] ?? 0}/{max}</span></div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-teal" style={{ width: `${Math.round(100 * (after.parts?.[k] || 0) / max)}%` }} /></div>
+            <div className="flex justify-between text-[11px] muted"><span>{l}</span><span className="tabular-nums">{part(after, k)}/{max}</span></div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-teal" style={{ width: `${Math.round(100 * part(after, k) / max)}%` }} /></div>
           </div>))}
       </div>
       {(after.matched?.length > 0 || after.missing?.length > 0) && (

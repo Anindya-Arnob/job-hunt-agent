@@ -20,7 +20,7 @@ from typing import Optional, Union
 
 from ..schemas import CVContent, CVProfile, JobForWriting
 from ..steps.score import profile_text
-from ..vocab import ALL_TERMS, find_terms_strict, term_regex
+from ..vocab import ALL_TERMS, concept_key, find_concepts, find_terms_strict, term_regex, variants
 
 TITLE_STOP = {
     "werkstudent", "werkstudentin", "werkstudent:in", "working", "student", "studentin", "studentische", "hilfskraft",
@@ -40,9 +40,75 @@ LANGS = {"german": ("german", "deutsch"), "english": ("english", "englisch"), "f
 
 Doc = Union[CVContent, CVProfile]
 
+# ------------------------------------------------------------------ language levels ---
+CEFR = ["A1", "A2", "B1", "B2", "C1", "C2"]
+_LEVEL_WORDS = [
+    (r"muttersprach|native|mother tongue", "C2"),
+    (r"verhandlungssicher|fließend|fliessend|fluent|proficient|sehr gute?", "C1"),
+    (r"fortgeschritten|advanced|upper[- ]intermediate|\bgute?\b|\bgood\b", "B2"),
+    (r"konversationssicher|conversational|intermediate|mittelstufe", "B1"),
+    (r"grundkenntnisse|basic|elementary|beginner|anfänger", "A2"),
+]
+_NICE = re.compile(r"\bplus\b|nice to have|von vorteil|wünschenswert|wuenschenswert|advantage|bonus|desirable|ideally"
+                   r"|preferred", re.I)
+
+
+def level_of(text: str) -> Optional[str]:
+    """CEFR level written in a text ('C1', 'B1-B2' -> B1, 'fließend' -> C1, 'Grundkenntnisse' -> A2)."""
+    m = re.search(r"(?<![A-Za-z])([ABCabc][12])(?![0-9])", text or "")
+    if m:
+        return m.group(1).upper()
+    for rx, lvl in _LEVEL_WORDS:
+        if re.search(rx, text or "", re.I):
+            return lvl
+    return None
+
+
+def required_levels(description: str) -> dict[str, str]:
+    """language -> lowest level the ad requires ('German is a plus' is not a requirement)."""
+    out: dict[str, str] = {}
+    for seg in re.split(r"[\n;,•·*]+|\s-\s(?=[A-ZÄÖÜ][a-zäöü]+\s*[-:–])", description or ""):
+        if _NICE.search(seg):
+            continue
+        pos = {}
+        for k, names in LANGS.items():
+            m = min((x.start() for n in names for x in re.finditer(rf"\b{n}", seg, re.I)), default=None)
+            if m is not None:
+                pos[k] = m
+        order = sorted(pos.items(), key=lambda kv: kv[1])
+        for i, (k, start) in enumerate(order):       # "German B2 and English C1": each its own level
+            end = order[i + 1][1] if i + 1 < len(order) else len(seg)
+            lvl = level_of(seg[start:end]) or level_of(seg)
+            if lvl and (k not in out or CEFR.index(lvl) > CEFR.index(out[k])):
+                out[k] = lvl
+    return out
+
+
+def language_gaps(job: JobForWriting, c: Doc) -> list[str]:
+    """'German: the ad asks for C1, your CV says A2': a knock-out no wording can fix."""
+    out = []
+    for k, need in required_levels(job.description).items():
+        mine = [l for l in c.languages if any(n in l.language.lower() for n in LANGS[k])]
+        have = level_of(mine[0].level) if mine else None
+        if not mine:
+            out.append(f"{k.title()}: the ad asks for {need}, your CV does not list it")
+        elif have and CEFR.index(have) < CEFR.index(need):
+            out.append(f"{k.title()}: the ad asks for {need}, your CV says {have}")
+    return out
+
 
 def hit(term: str, text: str) -> bool:
-    """Exact word match, singular or plural (most ATS stem 'AI Agents' / 'AI agent')."""
+    """Exact word match, singular or plural (most ATS stem 'AI Agents' / 'AI agent'), in any of the term's
+    forms ('Error Handling' = 'Fehlerbehandlung' = 'retries' ...)."""
+    forms = variants(term)
+    if len(forms) > 1:
+        return any(_hit1(f, text) for f in forms)
+    return _hit1(term, text)
+
+
+def _hit1(term: str, text: str) -> bool:
+    if len(term) <= 3 and term.isupper():          # AI, KI, ML, API: only with their capitals
+        return bool(re.search(rf"(?<![A-Za-z0-9+#]){re.escape(term)}(?![A-Za-z0-9+#])", text))
     if term_regex(term).search(text):
         return True
     if len(term) > 4 and term.endswith("s") and not term.endswith("ss"):
@@ -72,13 +138,15 @@ def keywords(job: JobForWriting) -> dict[str, int]:
         t = (t or "").strip()
         if not t or len(t) > 40:
             return
-        k = t.lower()
+        k = concept_key(t)
         if k not in key or wt > w[key[k]]:
             if k in key:
                 w.pop(key[k])
             key[k] = t
             w[t] = wt
     for t in find_terms_strict(f"{job.title}\n{job.description}", ALL_TERMS):
+        add(t, 1)
+    for t in find_concepts(f"{job.title}\n{job.description}"):    # what the ad asks for in words (German too)
         add(t, 1)
     for t in job.keywords:
         add(t, 2)
@@ -132,7 +200,9 @@ def score(job: JobForWriting, c: Doc, prof: CVProfile, text: Optional[str] = Non
     res_pts = 5 * min(1.0, (len(with_num) / len(bl)) / 0.3) if bl else 0
     asked = [k for k, names in LANGS.items() if any(re.search(rf"\b{n}\b", job.description or "", re.I) for n in names)]
     listed = " ".join(f"{l.language}" for l in c.languages).lower()
-    lang_hit = [k for k in asked if any(n in listed for n in LANGS[k])]
+    gaps = language_gaps(job, c)
+    short = {g.split(":")[0].lower() for g in gaps}          # listed, but below the level the ad asks for
+    lang_hit = [k for k in asked if any(n in listed for n in LANGS[k]) and k not in short]
     lang_pts = 5 * len(lang_hit) / len(asked) if asked else 5
     total = round(kw_pts + top_pts + title_pts + sec_pts + con_pts + res_pts + lang_pts)
     return {"score": max(0, min(100, total)),
@@ -140,6 +210,7 @@ def score(job: JobForWriting, c: Doc, prof: CVProfile, text: Optional[str] = Non
                       "contact": round(con_pts), "results": round(res_pts), "languages": round(lang_pts)},
             "matched": matched, "missing": missing,
             "missing_sections": [k for k, v in sections.items() if not v],
+            "knockouts": gaps, "n_keywords": len(kw), "few_keywords": len(kw) < 10,
             "missing_contact": [k for k, v in contact.items() if not v],
             "title_words": tw, "title_missing": [w for w in tw if w not in t_hit]}
 
@@ -223,6 +294,8 @@ def screen_checks(job: JobForWriting, c: CVContent, prof: CVProfile, truth: CVPr
                      "" if sc >= target else (f"{sc}: add these words you really have: {', '.join(addr[:10])}" if addr else
                                               f"{sc}: the missing words are skills you do not have, so they stay out"),
                      soft=not hard_ats))
+    gaps = ats_after.get("knockouts") or []
+    out.append(Check("Language level the ad asks for", not gaps, "; ".join(gaps), soft=True))   # no wording fixes it
     if ats_before and ats_before.get("matched"):
         lost = [t for t in ats_before["matched"] if t not in ats_after.get("matched", [])]
         out.append(Check("Keeps the keywords your main CV had", not lost,

@@ -134,7 +134,7 @@ def unknown_tools(c: CVContent, prof: CVProfile) -> list[str]:
     had' contradicted each other (one removed 'Large Language Models', the other put it back) and every round
     cost a rewrite."""
     from ..steps.score import profile_text
-    from ..vocab import term_regex
+    from ..vocab import concept_of, term_regex
     allowed = {norm_tool(t) for t in profile_tools(prof)}
     text = profile_text(prof)
 
@@ -142,7 +142,10 @@ def unknown_tools(c: CVContent, prof: CVProfile) -> list[str]:
         if _match_tool(t, allowed):
             return True
         forms = {t, re.sub(r"\s*\([^)]*\)", "", t).strip(), *re.findall(r"\(([^)]+)\)", t)}
-        return any(f and len(f) > 1 and term_regex(f).search(text) for f in forms)
+        if any(f and len(f) > 1 and term_regex(f).search(text) for f in forms):
+            return True
+        from .ats import hit          # 'Error Handling' is yours when your CV says 'retries' or 'Fehlerbehandlung'
+        return concept_of(t) != "" and hit(t, text)
     return [t for t in cv_tools(c) if not known(t)]
 
 
