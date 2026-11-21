@@ -183,9 +183,16 @@ def add_to_main(picks: list[dict], company: str = "") -> dict:
     plan_ = placements(prof, picks)
     p = prof.model_copy(deep=True)
     added = []
+    from ..vocab import is_practice
     for pl in plan_.items:
         have = " ".join(i for g in p.skills for i in g.items)
-        if not ats.hit(pl.term, have):
+        practice = is_practice(pl.term)
+        if practice:          # a way of working: shown in a bullet, not listed as a skill
+            from ..steps.score import profile_text
+            if not pl.bullet and not ats.hit(pl.term, profile_text(p)):
+                place = pl.place or (p.projects[0].name if p.projects else "")
+                pl.place, pl.bullet = place, f"Applied {pl.term.lower()} throughout the work."
+        elif not ats.hit(pl.term, have):
             g = next((g for g in p.skills if g.category.lower() == pl.skill_group.lower()), None)
             if g is None:
                 g = next((g for g in p.skills if g.category == "Additional Skills"), None)

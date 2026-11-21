@@ -292,8 +292,14 @@ def screen_checks(job: JobForWriting, c: CVContent, prof: CVProfile, truth: CVPr
     addr = addressable(ats_after.get("missing", []), truth, job)
     sc = ats_after.get("score", 0)
     hard_ats = sc < target and bool(addr)
+    from ..vocab import is_practice
+    tools = [t for t in addr[:10] if not is_practice(t)]
+    ways = [t for t in addr[:10] if is_practice(t)]
+    hint = "; ".join(x for x in (f"add these skills you really have: {', '.join(tools)}" if tools else "",
+                                 f"show these in a bullet or the profile, not in the skills list: {', '.join(ways)}"
+                                 if ways else "") if x)
     out.append(Check(f"ATS score {target}+", sc >= target,
-                     "" if sc >= target else (f"{sc}: add these words you really have: {', '.join(addr[:10])}" if addr else
+                     "" if sc >= target else (f"{sc}: {hint}" if addr else
                                               f"{sc}: the missing words are skills you do not have, so they stay out"),
                      soft=not hard_ats))
     gaps = ats_after.get("knockouts") or []

@@ -530,6 +530,37 @@ MONTHS_DE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "Augu
              "November", "Dezember"]
 
 
+# fixed words a German CV keeps in English otherwise (they come from your main CV, not from the writer)
+_DE_WORDS = [(r"\bWorking Student\b", "Werkstudent"), (r"\bInternship\b", "Praktikum"), (r"\bIntern\b(?= ·|$)", "Praktikant"),
+             (r"\bFull-time\b", "Vollzeit"), (r"\bPart-time\b", "Teilzeit"), (r"\bFreelance\b", "Freiberuflich"),
+             (r"\bGermany\b", "Deutschland"), (r"\bIndia\b", "Indien"), (r"\bAustria\b", "Österreich"),
+             (r"\bSwitzerland\b", "Schweiz"), (r"\bNetherlands\b", "Niederlande"), (r"\bMunich\b", "München"),
+             (r"\bCologne\b", "Köln"), (r"\bVienna\b", "Wien"), (r"\bOngoing\b", "laufend"), (r"\bongoing\b", "laufend"),
+             (r"\bPresent\b", "heute"), (r"\bpresent\b", "heute")]
+
+
+def de_words(text: str) -> str:
+    import re as _re
+    for rx, de in _DE_WORDS:
+        text = _re.sub(rx, de, text or "")
+    return text
+
+
+def _german_copy(content: CVContent, prof: CVProfile) -> tuple[CVContent, CVProfile]:
+    c = content.model_copy(deep=True)
+    for e in c.experience:
+        e.meta, e.dates = de_words(e.meta), de_words(e.dates)
+    for pr in c.projects:
+        pr.note, pr.dates = de_words(pr.note), de_words(pr.dates)
+    for ed in c.education:
+        ed.school, ed.dates, ed.degree = de_words(ed.school), de_words(ed.dates), de_words(ed.degree)
+    for ce in c.certifications:
+        ce.dates = de_words(ce.dates)
+    p = prof.model_copy(deep=True)
+    p.contact.location = de_words(p.contact.location)
+    return c, p
+
+
 def letter_date(d: date, lang: str = "en") -> str:
     return f"{d.day}. {MONTHS_DE[d.month - 1]} {d.year}" if lang == "de" else d.strftime("%d %B %Y")
 
@@ -631,6 +662,8 @@ def render_cv(content: CVContent, prof: CVProfile, style: dict, path: Path, comp
         photo = photo_for(content.lang)
     if not style.get("photo_area", True):
         photo = None
+    if content.lang == "de":
+        content, prof = _german_copy(content, prof)
     b = Builder(style, compact)
     H = HEADINGS.get(content.lang, HEADINGS["en"])
     if style.get("header") == "sidebar":
@@ -655,7 +688,8 @@ def render_letter(letter: LetterContent, prof: CVProfile, tagline: str, style: d
     f = st["font"]
     p = b.p(WD_ALIGN_PARAGRAPH.RIGHT)
     _spacing(p, 16, 10)
-    _run(p, f"{prof.contact.location}, {letter_date(today or date.today(), letter.lang)}".strip(", "), size,
+    loc = de_words(prof.contact.location) if letter.lang == "de" else prof.contact.location
+    _run(p, f"{loc}, {letter_date(today or date.today(), letter.lang)}".strip(", "), size,
          st["muted"], font=f)
     if letter.recipient or company:
         p = b.p()

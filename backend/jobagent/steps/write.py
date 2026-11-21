@@ -283,8 +283,10 @@ def cv_language_line(lang: str) -> str:
     if lang == "de":
         return ("CV LANGUAGE: German. Write the tagline, the summary, every bullet, the skill group names, degrees, "
                 "dates (e.g. 'Okt. 2024 – heute') and language levels in natural, professional German, no first "
-                "person. Keep every skill item, stack item, tool and technology name exactly as in the main CV "
-                "(e.g. 'Data Analysis', 'Python' stay as they are), and every number exactly as in the main CV.")
+                "person. Every bullet starts with a German verb or noun (e.g. 'Feinabstimmung von DistilBERT …', "
+                "'Entwickelte …', never 'Fine-tuned …' or 'Built …'). Keep every skill item, stack item, tool and "
+                "technology name exactly as in the main CV (e.g. 'Data Analysis', 'Python' stay as they are), and "
+                "every number exactly as in the main CV.")
     return "CV LANGUAGE: English, also when the job ad is in German."
 
 

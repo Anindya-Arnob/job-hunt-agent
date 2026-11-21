@@ -124,6 +124,18 @@ def variants(term: str) -> list[str]:
     return list(dict.fromkeys([term, c, *CONCEPTS[c]]))
 
 
+# Ways of working, not tools: on a CV they belong in a bullet that shows them ("Added retries and fallbacks"),
+# not in the skills list, where "Cost Control · Performance · Integrations" reads like keyword stuffing.
+PRACTICES = {"Error Handling", "Monitoring", "Security", "Cost Control", "Performance", "Integrations",
+             "Customer Collaboration", "Business Process Analysis", "Production Deployment", "Communication Skills",
+             "Analytical Skills", "Teamwork", "Documentation", "Software Engineering", "Data Structures"}
+
+
+def is_practice(term: str) -> bool:
+    c = concept_of(term)
+    return bool(c) and c in PRACTICES and term.lower() not in _SKILL_SET
+
+
 def concept_key(term: str) -> str:
     """One key per keyword: the concept for its forms, the tool itself for tools."""
     c = concept_of(term)

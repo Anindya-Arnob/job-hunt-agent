@@ -69,13 +69,15 @@ def test_ticked_words_go_into_your_main_cv_once(built):
     ], company="Nordlicht AI GmbH")
     after, _ = CV.get_main()
     skills = [i for g in after.skills for i in g.items]
-    assert "Error Handling" in skills and "Monitoring" in skills
+    assert "Error Handling" not in skills and "Monitoring" not in skills      # ways of working go into bullets
     p0 = next(p for p in after.projects if p.name == proj)
     assert any("retries" in b.lower() for b in p0.bullets)                   # written from your words
     assert not any(ch.isdigit() for b in p0.bullets[len(prof.projects[0].bullets):] for ch in b)   # no made-up numbers
     again = boost.add_to_main([{"term": "Error Handling", "where": ""}])
     after2, _ = CV.get_main()
-    assert [i for g in after2.skills for i in g.items].count("Error Handling") == 1
+    assert "Error Handling" not in [i for g in after2.skills for i in g.items]
+    assert sum("retries" in b.lower() for p in after2.projects for b in p.bullets) == \
+        sum("retries" in b.lower() for p in after.projects for b in p.bullets)       # not added twice
     assert out["version_id"] and again["version_id"] != out["version_id"]
 
 

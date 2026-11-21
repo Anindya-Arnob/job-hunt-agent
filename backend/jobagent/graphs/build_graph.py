@@ -360,6 +360,10 @@ def _trim_once(cv: CVContent, kw: dict, n: int, min_projects: int) -> int:
     return cuts
 
 
+def _key(x) -> str:
+    return (getattr(x, "name", "") or f"{getattr(x, 'title', '')} {getattr(x, 'org', '')}").strip().lower()
+
+
 def _repair(cv: CVContent, prof: CVProfile, jw: JobForWriting, before: Optional[dict]) -> list[str]:
     """Fix in code what two checks would otherwise send back to Claude for a whole rewrite (each one a full CV
     of tokens): drop tools your main CV does not show, put back keywords your main CV had."""
@@ -373,8 +377,29 @@ def _repair(cv: CVContent, prof: CVProfile, jw: JobForWriting, before: Optional[
             it.stack = [i for i in it.stack if i not in bad]
         cv.skills = [g for g in cv.skills if g.items]
         done.append("removed tools your main CV does not show: " + ", ".join(sorted(bad)))
+    from ..vocab import is_practice
+    body = "\n".join([cv.tagline, cv.summary] + [b for x in [*cv.experience, *cv.projects] for b in x.bullets])
+    moved = [i for g in cv.skills for i in g.items if is_practice(i) and ats.hit(i, body)]
+    if moved:            # a way of working is shown by a bullet; in the skills list it reads like stuffing
+        for g in cv.skills:
+            g.items = [i for i in g.items if i not in moved]
+        cv.skills = [g for g in cv.skills if g.items]
+        done.append("took out of the skills list (your bullets show them): " + ", ".join(moved))
     matched = set(ats.score(jw, cv, prof)["matched"])
     lost = [t for t in (before or {}).get("matched", []) if t not in matched]
+    back = []            # a lost way of working: put back the bullet of your main CV that shows it
+    for t in [t for t in lost if is_practice(t)]:
+        for src in [*prof.projects, *prof.experience]:
+            b = next((b for b in src.bullets if ats.hit(t, b)), None)
+            dst = next((x for x in [*cv.projects, *cv.experience] if _key(x) == _key(src)), None) if b else None
+            if dst is not None:
+                if b not in dst.bullets:
+                    dst.bullets.append(b)
+                back.append(t)
+                break
+    if back:
+        done.append("put back bullets from your main CV that show: " + ", ".join(back))
+    lost = [t for t in lost if not is_practice(t)]
     if lost and cv.skills:
         for t in lost:   # into the group that holds it in your main CV, else the last group
             cat = next((pg.category for pg in prof.skills if any(ats.hit(t, i) for i in [pg.category, *pg.items])), "")

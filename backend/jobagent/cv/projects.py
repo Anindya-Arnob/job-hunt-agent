@@ -37,6 +37,9 @@ def weighted_terms(job: JobForWriting) -> dict[str, float]:
     w: dict[str, float] = {}
     for t in find_terms_strict(f"{job.title}\n{job.description}", ALL_TERMS):
         w[t] = max(w.get(t, 0), 1.0)
+    from ..vocab import find_concepts
+    for t in find_concepts(f"{job.title}\n{job.description}"):   # error handling, Fehlerbehandlung, tests ...
+        w[t] = max(w.get(t, 0), 1.0)
     from ..docs.ats import title_words
     for t in title_words(job.title):                   # the role itself: "AI", "Automation"
         w[t] = max(w.get(t, 0), 2.0)
