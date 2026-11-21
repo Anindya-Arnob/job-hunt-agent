@@ -24,7 +24,8 @@ DESCRIPTIONS = {
                 "Tasks: build machine learning models in Python, SQL, scikit-learn, PyTorch. "
                 "Requirements: enrolled student, very good English, German nice to have. Tableau is a plus.",
     4100000002: "Machine Learning Internship (6 months). You will fine-tune LLMs with Hugging Face Transformers, "
-                "LoRA and PEFT, build RAG pipelines with LangChain and evaluate models. Python, PyTorch, Docker. English.",
+                "LoRA and PEFT, build RAG pipelines with LangChain and evaluate models. Python, PyTorch, Docker. English. "
+                "Our production services need automated tests, monitoring and cost control.",
     4100000004: "Working student for GenAI: prompt engineering, RAG, vector databases, LangGraph agents, FastAPI. "
                 "Fluent German (C1) required. Python.",
 }

@@ -86,7 +86,7 @@ export default function BuildOptions({ compact = false }) {
           </div>
           <div className="flex items-center gap-2 pt-1 text-xs font-semibold uppercase tracking-wider text-slate-500"><ShieldCheck size={14} />Hard to reject</div>
           <div className="grid gap-2">
-            <Field label="ATS target score" help="Below this, the writer adds the posting's exact words for skills you really have, then checks again.">
+            <Field label="ATS target score" help="80 is recommended. Below it, the writer adds the ad's exact words for skills your CV really shows. Words still missing are listed on Documents: tick what you have done and the CV is built again.">
               <input type="number" min={50} max={100} className="input w-32" value={f.ats_target} onChange={(e) => set('ats_target', +e.target.value || 75)} /></Field>
             <Toggle on={f.recruiter_review} onChange={(v) => set('recruiter_review', v)} title="Recruiter review"
               help="One extra pass reads the CV like a recruiter, names knock-outs (e.g. German C1) and applies true fixes. Costs one more call." />

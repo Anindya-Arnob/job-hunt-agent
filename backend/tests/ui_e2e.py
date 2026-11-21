@@ -208,6 +208,19 @@ with sync_playwright() as p:
     expect(page.get_by_text("Saved –")).to_be_visible(timeout=60000)
     page.get_by_role("button", name="Your main CV").click()
     page.wait_for_timeout(3000)
+    # reach your ATS target: tick missing words, they go into the main CV and the CV is built again
+    page.evaluate("fetch('/api/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ats_target: 100})})")
+    page.reload()
+    panel = page.get_by_test_id("reach-target")
+    expect(panel).to_be_visible(timeout=60000)
+    first = panel.get_by_test_id("boost-item").first.locator("input[type=checkbox]")
+    if not first.is_checked():
+        first.check()
+    shot(page, "10a_reach_target")
+    panel.get_by_role("button", name="Add and rebuild").click()
+    expect(page.get_by_text("Added to your main CV")).to_be_visible(timeout=60000)
+    page.wait_for_function("async () => (await (await fetch('/api/build/active')).json()).length === 0", timeout=180000, polling=1000)
+    page.evaluate("fetch('/api/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ats_target: 80})})")
 
     # 7b My details (prefilled from the CV) + Apply queue
     page.locator("aside").get_by_role("link", name=re.compile(r"^My\ details(\s|$)")).click()

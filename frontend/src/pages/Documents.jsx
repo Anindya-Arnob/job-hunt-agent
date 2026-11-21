@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Download, FolderOpen, Pencil, Save, Trash2 } from 'lucide-react'
 import { api, fileUrl, fmtDate } from '../api'
 import { CheckList, Empty, Modal, ParsedText, PdfPages, useAsync, useToast } from '../ui'
 import AtsPanel, { AtsBadge } from '../components/AtsPanel'
+import ReachTarget from '../components/ReachTarget'
+import { useActiveBuilds } from '../components/ActiveBuilds'
 
 export default function Documents() {
   const [params, setParams] = useSearchParams()
@@ -22,6 +24,13 @@ export default function Documents() {
   }, [docs.data])
   const jobId = +(params.get('job') || groups[0]?.job_id || 0)
   const g = groups.find((x) => x.job_id === jobId)
+  const builds = useActiveBuilds()
+  const wasBuilding = useRef(false)
+  useEffect(() => {                 // a rebuild of this job finished: show the new CV and score
+    const now = !!builds.byJob[jobId]
+    if (wasBuilding.current && !now) { docs.reload(); setBust(Date.now()) }
+    wasBuilding.current = now
+  }, [builds.byJob[jobId], jobId]) // eslint-disable-line
 
   useEffect(() => {
     if (view === 'main' && cv.data?.main && !mainPdf) api.post('/api/cv/preview', { profile: cv.data.main }).then((r) => setMainPdf(r.pdf_path))
@@ -76,6 +85,7 @@ export default function Documents() {
                 ? <p className="text-sm muted">Built earlier, before this app (found in your Claude CV folder). Checks weren't run. Use Rebuild on the job board to make a checked, editable version.</p>
                 : <>
                   <AtsPanel ats={g.docs.cv.ats} projects={g.docs.cv.projects_used} review={g.docs.cv.review} />
+                  <ReachTarget key={`${g.job_id}-${g.docs.cv.id}`} jobId={g.job_id} building={builds.byJob[g.job_id]} onStarted={builds.reload} />
                   {!g.docs.cv.ats && <p className="text-xs muted">Built before ATS scoring existed. Rebuild to see the ATS score before and after.</p>}
                   <CheckList checks={g.docs.cv.qa_results} /></>}</div>}
             </div>

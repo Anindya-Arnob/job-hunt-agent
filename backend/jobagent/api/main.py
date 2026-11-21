@@ -1088,6 +1088,43 @@ async def start_build(body: BuildIn):
     return {"run_id": run_id, "already_building": already}
 
 
+# ------------------------------------------------- reach your ATS target ---
+@app.get("/api/jobs/{job_id}/boost")
+async def boost_plan(job_id: int, target: Optional[int] = None):
+    from ..steps import boost
+    try:
+        return await asyncio.to_thread(boost.plan, job_id, target)
+    except boost.BoostError as e:
+        _err(e)
+
+
+class BoostItem(BaseModel):
+    term: str
+    where: str = ""
+    proof: Optional[dict] = None
+
+
+class BoostIn(BaseModel):
+    items: list[BoostItem]
+
+
+@app.post("/api/jobs/{job_id}/boost")
+async def boost_apply(job_id: int, body: BoostIn):
+    """Your ticks go into your main CV (asked once, used for every job), then this job's CV is built again."""
+    from ..steps import boost
+    if not body.items:
+        _err(ValueError("Tick at least one word"))
+    with db.session_scope() as s:
+        job = s.get(m.Job, job_id)
+        company = job.company if job else ""
+    try:
+        out = await asyncio.to_thread(boost.add_to_main, [i.model_dump() for i in body.items], company)
+    except boost.BoostError as e:
+        _err(e)
+    run_id, already = await runs.start_build([job_id], None, True)
+    return {**out, "run_id": run_id, "already_building": already}
+
+
 @app.get("/api/build/active")
 def builds_now():
     """Jobs whose CV is being built right now (also when you left the screen and came back)."""
