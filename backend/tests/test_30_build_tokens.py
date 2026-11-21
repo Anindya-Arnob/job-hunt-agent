@@ -59,7 +59,7 @@ def test_the_same_job_is_not_built_twice_at_once(setup, monkeypatch):  # noqa: F
     from jobagent.api.main import app
     gate = {}
 
-    async def slow_build(job_ids, cv_profile_id, rebuild, run_id):
+    async def slow_build(job_ids, cv_profile_id, rebuild, run_id, force=None):
         gate.setdefault("started", []).append(job_ids)
         await asyncio.sleep(1.5)
         return {"run_id": run_id, "results": []}
@@ -111,7 +111,7 @@ def test_stop_button_clears_the_build(setup, monkeypatch):  # noqa: F811
     from jobagent.api import runs
     from jobagent.api.main import app
 
-    async def slow_build(job_ids, cv_profile_id, rebuild, run_id):
+    async def slow_build(job_ids, cv_profile_id, rebuild, run_id, force=None):
         await asyncio.sleep(30)
     monkeypatch.setattr(runs.build_graph, "start_build", slow_build)
     with TestClient(app) as c:

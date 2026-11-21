@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronDown, Hammer, Play, SlidersHorizontal } from 'lucide-react'
-import { api, fmtDateTime, fmtTime } from '../api'
+import { api, fmtDateTime, fmtTime, stoppedText } from '../api'
 import { CheckList, Empty, ScoreBar, StatusBadge, useAsync, useToast, VerdictBadge } from '../ui'
 import { useEvents, useOnEvent } from '../events'
 import { BeingBuilt, useActiveBuilds } from '../components/ActiveBuilds'
@@ -32,6 +32,7 @@ export default function BuildQueue() {
       if (paused) { await api.post(`/api/build/${paused.id}/resume`, { job_ids: picked }) }
       else {
         const r = await api.post('/api/build', { job_ids: picked })
+        if ((r.stopped || []).length) toast(stoppedText(r), 'warn')
         if ((r.already_building || []).length) toast(`${r.already_building.length} job(s) were already being built – not started twice`, 'warn')
       }
       toast(`Building ${picked.length} CV(s)`); runs.reload(); builds.reload()
@@ -77,7 +78,8 @@ export default function BuildQueue() {
                   <tr key={c.job_id} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="w-10 px-4"><input type="checkbox" checked={picked.includes(c.job_id)} onChange={() => toggle(c.job_id)} /></td>
                     <td className="py-2"><ScoreBar score={c.score} /></td>
-                    <td className="py-2"><Link to={`/jobs/${c.job_id}`} className="font-medium hover:text-teal">{c.title}</Link><div className="text-xs muted">{c.company}</div></td>
+                    <td className="py-2"><Link to={`/jobs/${c.job_id}`} className="font-medium hover:text-teal">{c.title}</Link><div className="text-xs muted">{c.company}</div>
+                      {c.knockouts?.length > 0 && <div className="text-xs text-rose-700" title="Not built unless you click Build anyway on the job">⛔ Knock-out: {c.knockouts.join('; ')}</div>}</td>
                     <td className="px-4 text-right"><VerdictBadge verdict={c.verdict} /></td>
                   </tr>))}
               </tbody></table>

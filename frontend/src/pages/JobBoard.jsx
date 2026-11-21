@@ -5,7 +5,7 @@ import {
   ArrowDown, ArrowUp, Bookmark, BookmarkPlus, Check, Columns3, Download, ExternalLink, FileText, Hammer, Mail,
   RefreshCw, RotateCcw, Rows2, Rows3, Search, SlidersHorizontal, Trash2, X,
 } from 'lucide-react'
-import { api, fmtDate, fmtDateTime, SOURCE_LABEL } from '../api'
+import { api, fmtDate, fmtDateTime, SOURCE_LABEL, stoppedText } from '../api'
 import { Modal, StatusBadge, useToast, VerdictBadge } from '../ui'
 import { useOnEvent } from '../events'
 
@@ -109,7 +109,8 @@ function countryOf(loc) {
 
 function enrich(j) {
   const loc = j.location || ''
-  const breakers = (j.deal_breakers || []).filter((d) => d.text && !/^\s*none\s*$/i.test(d.text))
+  const breakers = [...(j.knockouts || []).map((t) => ({ text: t, hard: true, knockout: true })),
+    ...(j.deal_breakers || []).filter((d) => d.text && !/^\s*none\s*$/i.test(d.text))]
   return {
     ...j,
     _mode: j.work_mode || (/remote/i.test(loc) ? 'Remote' : /hybrid/i.test(loc) ? 'Hybrid' : ''),
@@ -396,8 +397,13 @@ export default function JobBoard() {
     try {
       const r = await api.post('/api/build', { job_ids: selected.map((s) => s.id) })
       const already = (r.already_building || []).length
-      toast(already ? `${selected.length - already} CV(s) started; ${already} already being built (not started twice)` : `Building ${selected.length} CV(s) – run #${r.run_id}`)
-      nav('/build')
+      const stopped = (r.stopped || []).length
+      if (stopped) toast(stoppedText(r), 'warn')
+      if (r.run_id) {
+        const n = selected.length - stopped
+        toast(already ? `${n - already} CV(s) started; ${already} already being built (not started twice)` : `Building ${n} CV(s) – run #${r.run_id}`)
+        nav('/build')
+      }
     } catch (e) { toast(e.message, 'error') }
   }
   const setStatusSelected = async (status) => {
@@ -641,9 +647,10 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
   if (!j) return <div className="card w-[480px] p-4 muted">Loading…</div>
   const b = j.breakdown
   const patch = async (body) => { await api.patch(`/api/jobs/${id}`, body); await load(); onChanged && onChanged() }
-  const build = async (rebuild = false) => {
+  const build = async (rebuild = false, force = false) => {
     try {
-      const r = await api.post('/api/build', { job_ids: [id], rebuild })
+      const r = await api.post('/api/build', { job_ids: [id], rebuild, force })
+      if ((r.stopped || []).length) { toast(stoppedText(r), 'warn'); return }
       toast((r.already_building || []).length ? 'Already being built – not started twice' : 'Building CV and cover letter'); nav('/build')
     }
     catch (e) { toast(e.message, 'error') }
@@ -664,6 +671,13 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
         <button className="btn-ghost p-1" onClick={onClose}><X size={16} /></button>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-4 text-sm">
+        {j.knockouts?.length > 0 && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-rose-900" data-testid="job-knockouts">
+            <div className="font-semibold">Knock-out – the app won't build this CV</div>
+            <ul className="mt-1 list-disc pl-5 text-xs">{j.knockouts.map((k) => <li key={k}>{k}</li>)}</ul>
+            <div className="mt-2 flex items-center gap-2 text-xs"><span className="muted">No wording fixes this, so building would spend tokens on a likely “no”.</span>
+              <button className="btn-outline ml-auto shrink-0 border-rose-300 py-1 text-xs text-rose-700" onClick={() => build(true, true)}>Build anyway</button></div>
+          </div>)}
         {j.status === 'needs_review' && (
           <div className="rounded-md bg-amber-50 p-3">
             <div className="mb-2 font-semibold text-amber-900">Job type unclear – what is it?</div>
@@ -684,7 +698,7 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
             {j.score_outdated && <p className="mt-1 text-xs text-amber-700">Scored against an older CV version – re-score on the Runs screen.</p>}
           </div>
         )}
-        {j.deal_breakers?.length > 0 && (
+        {j.deal_breakers?.filter((d) => d.text && !/^\s*none\s*$/i.test(d.text)).length > 0 && (
           <div><span className="label">Deal-breakers</span>
             <ul className="space-y-1">{j.deal_breakers.map((d, i) => <li key={i} className={d.hard ? 'text-rose-700' : 'text-amber-800'}>{d.hard ? '⛔' : '⚠️'} {d.text}</li>)}</ul></div>
         )}

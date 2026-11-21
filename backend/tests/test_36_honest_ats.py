@@ -67,12 +67,12 @@ def test_a_language_below_the_level_is_a_knock_out():
     job = JobForWriting(company="BITS", title="Forward Deployed AI Engineer", description=BITS)
     prof, a2 = _cv("Grundkenntnisse (A2)")
     r = ats.score(job, a2, prof)
-    assert r["knockouts"] == ["German: the ad asks for C1, your CV says A2"] and r["parts"]["languages"] < 5
+    assert "German: the ad asks for C1, your CV says A2" in r["knockouts"] and r["parts"]["languages"] < 5
     _, c1 = _cv("Fließend (C1)")
     r2 = ats.score(job, c1, prof)
-    assert r2["knockouts"] == [] and r2["parts"]["languages"] == 5
+    assert not any("German" in k for k in r2["knockouts"]) and r2["parts"]["languages"] == 5
     checks = ats.screen_checks(job, a2, prof, prof, r, 80, "", None)
-    ko = next(c for c in checks if c.name == "Language level the ad asks for")
+    ko = next(c for c in checks if c.name == "Knock-outs the ad states")
     assert not ko.passed and ko.soft and "C1" in ko.detail          # shown, never a rewrite
 
 

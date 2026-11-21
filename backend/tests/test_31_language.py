@@ -119,6 +119,6 @@ def test_the_build_says_which_language(monkeypatch, master_cv_path):
     with db.session_scope() as s:
         job = s.get(m.Job, jid)
     store_score(jid, score_job(job, prof), vid)
-    out = asyncio.run(B.start_build([jid]))
+    out = asyncio.run(B.start_build([jid], force=[jid]))
     msgs = [e["message"] for e in events.recent(out["run_id"], 500)]
     assert any("CV and cover letter in German (the job ad asks for German)" in x for x in msgs), msgs

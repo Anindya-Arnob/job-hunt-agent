@@ -26,7 +26,7 @@ def built(setup, monkeypatch):  # noqa: F811
         j.full_description = (j.full_description or "") + EXTRA
         s.add(j)
     monkeypatch.setattr(settings, "github_projects", False)
-    asyncio.run(B.start_build([setup["good"]]))
+    asyncio.run(B.start_build([setup["good"]], force=[setup["good"]]))   # it has a German knock-out
     return setup["good"]
 
 

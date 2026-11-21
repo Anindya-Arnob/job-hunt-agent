@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Copy, Download, ExternalLink, FileText, Files, Loader2, Mail, MonitorPlay, Play, Puzzle, RefreshCw, RotateCcw, SkipForward, Square, UserRound } from 'lucide-react'
-import { api, fileUrl, fmtDate, fmtDateTime } from '../api'
+import { api, fileUrl, fmtDate, fmtDateTime, stoppedText } from '../api'
 import { Empty, Modal, Tabs, useAsync, useToast } from '../ui'
 import { useOnEvent } from '../events'
 import { BeingBuilt, BuildingNote, useActiveBuilds } from '../components/ActiveBuilds'
@@ -164,7 +164,8 @@ export default function Apply() {
     if (!ids.length) { toast('Already being built – see the line under the job', 'warn'); return }
     try {
       const r = await api.post('/api/build', { job_ids: ids, rebuild: true })
-      const started = ids.length - (r.already_building || []).length
+      if ((r.stopped || []).length) toast(stoppedText(r), 'warn')
+      const started = r.run_id ? ids.length - (r.already_building || []).length - (r.stopped || []).length : 0
       if (started) toast(`Rebuilding CV + cover letter for ${started} job(s), one after another. Progress shows under each job.`)
       if ((r.already_building || []).length) toast(`${r.already_building.length} job(s) were already being built – not started twice`, 'warn')
       builds.reload()

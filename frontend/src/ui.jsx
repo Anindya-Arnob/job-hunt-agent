@@ -140,7 +140,7 @@ export function ToastProvider({ children }) {
         {items.map((t) => (
           <div key={t.id} className={`card-solid flex items-start gap-2 p-3 text-sm ${t.kind === 'error' ? 'border-rose-200' : t.kind === 'warn' ? 'border-amber-200' : ''}`}>
             {t.kind === 'error' ? <AlertTriangle size={16} className="text-rose-600" /> : t.kind === 'warn' ? <AlertTriangle size={16} className="text-amber-600" /> : <CheckCircle2 size={16} className="text-teal" />}
-            <span className="flex-1">{t.msg}</span>
+            <span className="flex-1 whitespace-pre-line">{t.msg}</span>
           </div>
         ))}
       </div>

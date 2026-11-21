@@ -200,8 +200,10 @@ def score(job: JobForWriting, c: Doc, prof: CVProfile, text: Optional[str] = Non
     res_pts = 5 * min(1.0, (len(with_num) / len(bl)) / 0.3) if bl else 0
     asked = [k for k, names in LANGS.items() if any(re.search(rf"\b{n}\b", job.description or "", re.I) for n in names)]
     listed = " ".join(f"{l.language}" for l in c.languages).lower()
-    gaps = language_gaps(job, c)
-    short = {g.split(":")[0].lower() for g in gaps}          # listed, but below the level the ad asks for
+    from ..steps import knockouts as K
+    reqs = K.check(job.description, c, K.details_or_none())
+    gaps = [r["text"] for r in reqs if not r["ok"]]
+    short = {r["label"].lower() for r in reqs if r["key"].startswith("language:") and not r["ok"]}
     lang_hit = [k for k in asked if any(n in listed for n in LANGS[k]) and k not in short]
     lang_pts = 5 * len(lang_hit) / len(asked) if asked else 5
     total = round(kw_pts + top_pts + title_pts + sec_pts + con_pts + res_pts + lang_pts)
@@ -210,7 +212,7 @@ def score(job: JobForWriting, c: Doc, prof: CVProfile, text: Optional[str] = Non
                       "contact": round(con_pts), "results": round(res_pts), "languages": round(lang_pts)},
             "matched": matched, "missing": missing,
             "missing_sections": [k for k, v in sections.items() if not v],
-            "knockouts": gaps, "n_keywords": len(kw), "few_keywords": len(kw) < 10,
+            "knockouts": gaps, "requirements": reqs, "n_keywords": len(kw), "few_keywords": len(kw) < 10,
             "missing_contact": [k for k, v in contact.items() if not v],
             "title_words": tw, "title_missing": [w for w in tw if w not in t_hit]}
 
@@ -295,7 +297,7 @@ def screen_checks(job: JobForWriting, c: CVContent, prof: CVProfile, truth: CVPr
                                               f"{sc}: the missing words are skills you do not have, so they stay out"),
                      soft=not hard_ats))
     gaps = ats_after.get("knockouts") or []
-    out.append(Check("Language level the ad asks for", not gaps, "; ".join(gaps), soft=True))   # no wording fixes it
+    out.append(Check("Knock-outs the ad states", not gaps, "; ".join(gaps), soft=True))   # no wording fixes them
     if ats_before and ats_before.get("matched"):
         lost = [t for t in ats_before["matched"] if t not in ats_after.get("matched", [])]
         out.append(Check("Keeps the keywords your main CV had", not lost,

@@ -53,3 +53,10 @@ export const SOURCE_LABEL = {
   'email:linkedin': 'Email · LinkedIn', 'email:indeed': 'Email · Indeed', 'email:microsoft': 'Email · Microsoft', email: 'Email', inbox: 'Your inbox',
   remoteok: 'RemoteOK', career_pages: 'Career page', feeds: 'Job feeds', imported: 'Earlier Excel', web: 'Other job sites', websearch: 'Web search',
 }
+
+// After POST /api/build: jobs not built because the ad states a knock-out you do not meet
+export function stoppedText(r) {
+  const st = r?.stopped || []
+  if (!st.length) return ''
+  return st.map((x) => `${x.job || 'A job'}: not built – ${x.reasons.join('; ')}`).join('\n') + (st.length ? '\nUse “Build anyway” on the job if you still want it.' : '')
+}

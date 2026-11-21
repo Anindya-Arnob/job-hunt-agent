@@ -127,7 +127,7 @@ def _register(run_id: int, job_ids: list[int]) -> None:
 
 
 async def start_build(job_ids: Optional[list[int]], cv_profile_id: Optional[int] = None,
-                      rebuild: bool = False) -> tuple[int, list[int]]:
+                      rebuild: bool = False, force: Optional[list[int]] = None) -> tuple[int, list[int]]:
     """Returns the run and the jobs left out because they are being built already."""
     active = building()
     already = [j for j in (job_ids or []) if j in active]
@@ -136,7 +136,7 @@ async def start_build(job_ids: Optional[list[int]], cv_profile_id: Optional[int]
         return active[already[0]]["run_id"], already
     run_id = _new_run("build")
     _register(run_id, todo)
-    _track(run_id, build_graph.start_build(todo or None, cv_profile_id, rebuild, run_id=run_id))
+    _track(run_id, build_graph.start_build(todo or None, cv_profile_id, rebuild, run_id=run_id, force=force))
     return run_id, already
 
 

@@ -40,6 +40,7 @@ class BuildState(TypedDict, total=False):
     queue: list
     cv_profile_id: Optional[int]
     rebuild: bool
+    force: list                 # jobs to build even with a knock-out ("Build anyway")
     current: Optional[int]
     cv: Optional[dict]
     letter: Optional[dict]
@@ -182,8 +183,15 @@ def candidates(min_score: Optional[int] = None) -> list[dict]:
     with db.session_scope() as s:
         rows = s.exec(select(m.Job, m.Score).join(m.Score, m.Score.job_id == m.Job.id)
                       .where(m.Score.total >= min_score, m.Job.status == m.JobStatus.SCORED)).all()
-    return [{"job_id": j.id, "company": j.company, "title": j.title, "score": sc.total, "verdict": sc.verdict}
-            for j, sc in sorted(rows, key=lambda t: -t[1].total)]
+    from ..steps import knockouts as K
+    got = cvs.get_main()
+    details = K.details_or_none()
+    out = []
+    for j, sc in sorted(rows, key=lambda t: -t[1].total):
+        kos = K.knockouts(j.full_description or "", got[0], details) if got else []
+        out.append({"job_id": j.id, "company": j.company, "title": j.title, "score": sc.total,
+                    "verdict": "Skip" if kos else sc.verdict, "knockouts": kos})
+    return out
 
 
 def _short_issue(c) -> str:
@@ -247,6 +255,16 @@ def next_job(state: BuildState) -> dict:
         if sc and sc.total < settings.build_min_score and not state.get("rebuild"):
             results.append({"job_id": jid, "status": "skipped", "reason": f"Score {sc.total} below {settings.build_min_score}"})
             continue
+        if jid not in (state.get("force") or []):
+            from ..steps import knockouts as K
+            kos = K.knockouts(job.full_description, _profile(state)[0], K.details_or_none())
+            if kos:
+                why = "; ".join(kos)
+                results.append({"job_id": jid, "status": "stopped", "reason": f"Knock-out: {why}"})
+                events.emit({"type": "build", "message": f"{job.company} – {job.title}: not built. Knock-out: {why}. "
+                             "Use 'Build anyway' on the job if you still want this CV.", "job_id": jid},
+                            run_id=state["run_id"])
+                continue
         have = built_files(jid)
         if have and not state.get("rebuild"):
             results.append({"job_id": jid, "status": "already built", "folder": str(Path(have[0]).parent),
@@ -684,7 +702,7 @@ async def _invoke(inp: Any, run_id: int) -> dict:
 
 
 async def start_build(job_ids: Optional[list[int]] = None, cv_profile_id: Optional[int] = None,
-                      rebuild: bool = False, run_id: Optional[int] = None) -> dict:
+                      rebuild: bool = False, run_id: Optional[int] = None, force: Optional[list[int]] = None) -> dict:
     if run_id is None:
         with db.session_scope() as s:
             r = m.Run(kind="build", status="running")
@@ -696,6 +714,7 @@ async def start_build(job_ids: Optional[list[int]] = None, cv_profile_id: Option
     events.emit({"type": "run_started", "kind": "build", "message": "Build started"}, run_id=run_id)
     try:
         return await _invoke({"run_id": run_id, "job_ids": job_ids or [], "cv_profile_id": cv_profile_id,
+                              "force": list(force or []),
                               "rebuild": rebuild, "results": []}, run_id)
     except Exception as e:
         log.exception("build failed")

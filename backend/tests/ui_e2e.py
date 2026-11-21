@@ -222,6 +222,14 @@ with sync_playwright() as p:
     page.wait_for_function("async () => (await (await fetch('/api/build/active')).json()).length === 0", timeout=180000, polling=1000)
     page.evaluate("fetch('/api/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ats_target: 80})})")
 
+    # knock-outs: a job whose ad requires German C1 shows why the app won't build it
+    ko = page.evaluate("async () => (await (await fetch('/api/jobs')).json()).find(j => (j.knockouts || []).length)")
+    assert ko and ko["verdict"] == "Skip", ko
+    page.goto(BASE + f"/jobs/{ko['id']}")
+    expect(page.get_by_test_id("job-knockouts")).to_contain_text("German")
+    expect(page.get_by_role("button", name="Build anyway")).to_be_visible()
+    shot(page, "10b_knockout")
+
     # 7b My details (prefilled from the CV) + Apply queue
     page.locator("aside").get_by_role("link", name=re.compile(r"^My\ details(\s|$)")).click()
     expect(page.get_by_role("heading", name="My details")).to_be_visible()

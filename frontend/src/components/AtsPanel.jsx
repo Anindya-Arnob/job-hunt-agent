@@ -33,6 +33,12 @@ export default function AtsPanel({ ats, projects, review }) {
       {after.knockouts?.length > 0 && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800" data-testid="ats-knockout">
           <b>Knock-out:</b> {after.knockouts.join('; ')}. No wording fixes this; many portals filter on it before anyone reads the CV.</div>)}
+      {after.requirements?.some((r) => r.ok) && (
+        <div className="flex flex-wrap gap-1 text-xs" data-testid="ats-met">
+          {after.requirements.filter((r) => r.ok).map((r) => (
+            <span key={r.key} className={`chip ${r.unknown ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`} title={r.text}>
+              {r.unknown ? '?' : '✓'} {r.label}: {r.unknown ? 'fill in My details' : r.need}</span>))}
+        </div>)}
       {after.few_keywords && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="ats-few">
           Only {after.n_keywords} keywords found in this ad, so this score says little. Read the ad yourself too.</div>)}

@@ -80,7 +80,32 @@ def _err(e: Exception, code: int = 400):
 
 
 # ------------------------------------------------------------------ helpers ---
-def job_dict(j: m.Job, sc: Optional[m.Score] = None, full: bool = False) -> dict:
+_KO_CACHE: dict = {}
+
+
+def _knockouts_cached(j: m.Job, ctx) -> list[str]:
+    if not ctx:
+        return []
+    prof, details, key = ctx
+    k = (j.id, key)
+    if k not in _KO_CACHE:
+        from ..steps import knockouts as K
+        if len(_KO_CACHE) > 20000:
+            _KO_CACHE.clear()
+        _KO_CACHE[k] = K.knockouts(j.full_description or "", prof, details)
+    return _KO_CACHE[k]
+
+
+def _ko_context():
+    from ..steps import knockouts as K
+    got = cvs.get_main()
+    if not got:
+        return None
+    details = K.details_or_none()
+    return got[0], details, (got[1], details.model_dump_json() if details else "")
+
+
+def job_dict(j: m.Job, sc: Optional[m.Score] = None, full: bool = False, ko=None) -> dict:
     d = {
         "id": j.id, "company": j.company, "title": j.title, "job_type": j.job_type, "role_category": j.role_category,
         "location": j.location, "work_mode": j.work_mode,
@@ -93,6 +118,10 @@ def job_dict(j: m.Job, sc: Optional[m.Score] = None, full: bool = False) -> dict
         "deal_breakers": sc.deal_breakers if sc else [],
         "has_description": bool(j.full_description),
     }
+    kos = _knockouts_cached(j, ko) if ko else []
+    d["knockouts"] = kos
+    if kos:
+        d["verdict"] = "Skip"                       # a knock-out: unlikely, whatever the fit score
     if full:
         d.update({
             "full_description": j.full_description, "required_skills": j.required_skills, "keywords": j.keywords,
@@ -526,9 +555,11 @@ def list_jobs(tab: str = "all", verdict: Optional[str] = None, min_score: Option
         for jid_, kind in s.exec(select(m.Document.job_id, m.Document.kind)).all():
             kinds.setdefault(jid_, set()).add(kind)
     out = []
+    ko = _ko_context()
     for j in jobs:
         sc = scores.get(j.id)
-        if verdict and (not sc or sc.verdict != verdict):
+        d = job_dict(j, sc, ko=ko)
+        if verdict and d["verdict"] != verdict:
             continue
         if min_score is not None and (not sc or sc.total < min_score):
             continue
@@ -538,9 +569,8 @@ def list_jobs(tab: str = "all", verdict: Optional[str] = None, min_score: Option
             continue
         if tab == "email" and not any(str(x).startswith("email") for x in (j.sources or [])):
             continue
-        if hide_hard_blockers and sc and any(d.get("hard") for d in sc.deal_breakers):
+        if hide_hard_blockers and ((sc and any(x.get("hard") for x in sc.deal_breakers)) or d["knockouts"]):
             continue
-        d = job_dict(j, sc)
         d["has_cv"] = "cv" in kinds.get(j.id, ())
         d["has_letter"] = "letter" in kinds.get(j.id, ())
         out.append(d)
@@ -996,7 +1026,7 @@ def get_job(jid: int):
         sc = s.exec(select(m.Score).where(m.Score.job_id == jid)).first()
         docs = s.exec(select(m.Document).where(m.Document.job_id == jid)).all()
         app_row = s.exec(select(m.Application).where(m.Application.job_id == jid)).first()
-    d = job_dict(j, sc, full=True)
+    d = job_dict(j, sc, full=True, ko=_ko_context())
     d["documents"] = [doc_dict(x) for x in docs]
     d["application"] = app_row.model_dump(mode="json") if app_row else None
     return d
@@ -1078,14 +1108,40 @@ class BuildIn(BaseModel):
     job_ids: list[int] = []
     cv_profile_id: Optional[int] = None
     rebuild: bool = False
+    force: bool = False          # "Build anyway": build even with a knock-out
+
+
+def knockouts_for(job_ids: list[int]) -> dict[int, list[str]]:
+    """job -> knock-outs (requirements the ad states that you do not meet)."""
+    from ..steps import knockouts as K
+    got = cvs.get_main()
+    if not got or not job_ids:
+        return {}
+    prof, details = got[0], K.details_or_none()
+    out = {}
+    with db.session_scope() as s:
+        for jid in job_ids:
+            j = s.get(m.Job, jid)
+            kos = K.knockouts(j.full_description or "", prof, details) if j else []
+            if kos:
+                out[jid] = kos
+    return out
 
 
 @app.post("/api/build")
 async def start_build(body: BuildIn):
     if not cvs.get_main() and not body.cv_profile_id:
         _err(ValueError("Upload your main CV first (My CV screen)."))
-    run_id, already = await runs.start_build(body.job_ids or None, body.cv_profile_id, body.rebuild)
-    return {"run_id": run_id, "already_building": already}
+    stopped = {} if body.force else knockouts_for(body.job_ids)      # stop before any token is spent
+    todo = [j for j in body.job_ids if j not in stopped]
+    with db.session_scope() as s:
+        names = {k: (lambda j: f"{j.company} – {j.title}" if j else "")(s.get(m.Job, k)) for k in stopped}
+    st = [{"job_id": k, "job": names.get(k, ""), "reasons": v} for k, v in stopped.items()]
+    if body.job_ids and not todo:
+        return {"run_id": None, "already_building": [], "stopped": st}
+    run_id, already = await runs.start_build(todo or None, body.cv_profile_id, body.rebuild,
+                                             force=list(body.job_ids) if body.force else None)
+    return {"run_id": run_id, "already_building": already, "stopped": st}
 
 
 # ------------------------------------------------- reach your ATS target ---
@@ -1121,7 +1177,7 @@ async def boost_apply(job_id: int, body: BoostIn):
         out = await asyncio.to_thread(boost.add_to_main, [i.model_dump() for i in body.items], company)
     except boost.BoostError as e:
         _err(e)
-    run_id, already = await runs.start_build([job_id], None, True)
+    run_id, already = await runs.start_build([job_id], None, True, force=[job_id])   # you chose to improve this CV
     return {**out, "run_id": run_id, "already_building": already}
 
 

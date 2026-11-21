@@ -210,7 +210,7 @@ def test_build_uses_github_project_count_and_records_ats(master_cv_path, fake_gi
     with db.session_scope() as s:
         job = s.get(m.Job, jid)
     store_score(jid, score_job(job, prof), vid)
-    out = asyncio.run(B.start_build([jid]))
+    out = asyncio.run(B.start_build([jid], force=[jid]))   # German C1: a knock-out, built on purpose
     r = out["results"][0]
     assert r["status"].startswith("built"), r.get("failed_checks")
     assert "Grid Agent" in r["projects"] and len(r["projects"]) in (3, 4)
