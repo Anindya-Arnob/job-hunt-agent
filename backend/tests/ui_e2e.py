@@ -237,10 +237,19 @@ with sync_playwright() as p:
         return js.find(j => !(j.knockouts || []).length && j.score >= s.build_min_score && j.status === 'scored') }""")
     assert pick, "no job left to build"
     page.goto(BASE + f"/jobs/{pick['id']}")
+    page.get_by_test_id("claude-check").click()                                  # Claude reads only the ad
+    expect(page.get_by_text("Claude check: score")).to_be_visible(timeout=60000)
+    expect(page.get_by_test_id("claude-check")).to_have_text("Check again")
+    expect(page.get_by_test_id("job-knockouts")).to_contain_text("one of Gurobi, OR-Tools")
+    shot(page, "10b0_claude_check")
     page.get_by_role("button", name="Build CV").click()
     page.wait_for_timeout(1000)
     page.wait_for_function("async () => (await (await fetch('/api/build/active')).json()).length === 0", timeout=180000, polling=1000)
     page.goto(BASE + f"/jobs/{pick['id']}")
+    page.get_by_role("button", name=re.compile(r"^Stopped\s*\d+$")).click()       # the Stopped tab lists it, with why
+    expect(page.locator(".ag-header-cell-text", has_text="Why it stopped")).to_be_visible()
+    expect(page.locator(".ag-row", has_text=pick["title"]).first).to_contain_text("one of Gurobi, OR-Tools")
+    shot(page, "10b1_stopped_tab")
     expect(page.get_by_test_id("job-knockouts")).to_contain_text("one of Gurobi, OR-Tools")
     expect(page.get_by_text("Read by Claude")).to_be_visible()
     page.get_by_role("button", name="I have this").click()
@@ -254,6 +263,14 @@ with sync_playwright() as p:
     page.evaluate("fetch('/test/must?on=false', {method: 'POST'})")
     left = page.evaluate(f"async () => (await (await fetch('/api/jobs/{pick['id']}')).json()).missing_tools")
     assert left == [], left
+    for _ in range(120):                                                         # the rebuild runs in the background
+        if page.evaluate(f"async () => (await (await fetch('/api/jobs/{pick['id']}')).json()).status") == "built":
+            break
+        page.wait_for_timeout(1000)
+    stopped_now = page.evaluate("async () => (await (await fetch('/api/jobs/counts')).json()).stopped")
+    assert stopped_now == 0, stopped_now                                         # built: off the Stopped tab
+    page.goto(BASE + "/jobs")
+    page.get_by_role("button", name=re.compile(r"^New\s*\d+$")).click()        # the board remembers its tab
     page.evaluate(f"fetch('/api/jobs/{pick['id']}', {{method: 'DELETE'}})")    # the later steps expect one built job
 
     # 7b My details (prefilled from the CV) + Apply queue
@@ -285,6 +302,21 @@ with sync_playwright() as p:
     shot(page, "10c_my_documents")
     page.locator("aside").get_by_role("link", name=re.compile(r"^Apply(\s|$)")).click()
     expect(page.get_by_text("Your jobs with a finished CV")).to_be_visible()
+    expect(page.get_by_role("button", name="Apply in my browser")).to_be_visible()
+    # every built CV, newest first, with its ATS score; "Not applying" takes one off the list and Undo puts it back
+    row = page.get_by_test_id("apply-row").first
+    expect(row).to_contain_text("Built ")
+    expect(row).to_contain_text("ATS · fit")
+    page.get_by_label("Sort").select_option("ats")
+    row.get_by_role("button", name=re.compile(r"^Not applying to ")).click()
+    expect(page.get_by_text("Moved to Not applying")).to_be_visible()
+    page.get_by_role("button", name=re.compile(r"^Not applying\s*1$")).click()
+    expect(page.get_by_test_id("apply-row")).to_have_count(1)
+    shot(page, "10c0_not_applying")
+    page.get_by_test_id("apply-row").get_by_role("button", name="Undo").click()
+    expect(page.get_by_text("Back in To apply")).to_be_visible()
+    page.get_by_role("button", name=re.compile(r"^To apply\s*1$")).click()
+    page.get_by_label("Sort").select_option("built")
     expect(page.get_by_role("button", name="Apply in my browser")).to_be_visible()
     # one PDF: letter + CV + your documents
     page.get_by_role("button", name="One PDF").first.click()

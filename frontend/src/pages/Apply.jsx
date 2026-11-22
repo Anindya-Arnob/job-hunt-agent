@@ -1,16 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Copy, Download, ExternalLink, FileText, Files, Loader2, Mail, MonitorPlay, Play, Puzzle, RefreshCw, RotateCcw, SkipForward, Square, UserRound } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, Copy, Download, ExternalLink, FileText, Files, Loader2, Mail, MonitorPlay, Play, Puzzle, RefreshCw, RotateCcw, SkipForward, Square, Undo2, UserRound } from 'lucide-react'
 import { api, fileUrl, fmtDate, fmtDateTime, stoppedText } from '../api'
 import { Empty, Modal, Tabs, useAsync, useToast } from '../ui'
 import { useOnEvent } from '../events'
 import { BeingBuilt, BuildingNote, useActiveBuilds } from '../components/ActiveBuilds'
 
-function ScorePill({ score }) {
-  if (score === null || score === undefined) return <span className="text-slate-300">–</span>
-  const c = score >= 65 ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : score >= 40 ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-slate-100 text-slate-500 ring-slate-200'
-  return <span className={`inline-flex h-8 w-10 items-center justify-center rounded-lg text-sm font-bold tabular-nums ring-1 ${c}`}>{score}</span>
+function AtsPill({ ats, target, match }) {
+  const c = ats === null || ats === undefined ? 'bg-slate-100 text-slate-400 ring-slate-200'
+    : ats >= target ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-amber-200'
+  return (
+    <div className="flex flex-col items-center leading-tight" title={`ATS score of this CV (your target ${target}). Match score of the job: ${match ?? '–'}`}>
+      <span className={`inline-flex h-8 w-11 items-center justify-center rounded-lg text-sm font-bold tabular-nums ring-1 ${c}`}>{ats ?? '–'}</span>
+      <span className="mt-0.5 text-[10px] text-slate-400">ATS · fit {match ?? '–'}</span>
+    </div>)
 }
+
+const SORTS = { built: 'Newest build', ats: 'ATS score', score: 'Match score' }
+const sortJobs = (jobs, by) => [...jobs].sort((a, b) => by === 'built' ? (b.built_at || '').localeCompare(a.built_at || '')
+  : ((b[by] ?? -1) - (a[by] ?? -1)) || (b.built_at || '').localeCompare(a.built_at || ''))
 
 const STATE = { opening: 'Opening the job…', filling: 'Filling the form…', waiting: 'Your turn: check, answer the red fields, tick consent, press Submit', done: 'Finished', stopped: 'Stopped', idle: '' }
 
@@ -148,6 +156,10 @@ export default function Apply() {
   const act = useAsync(() => api.get('/api/ext/active'))
   const [sel, setSel] = useState(null)
   const [tab, setTab] = useState('todo')
+  const [sortBy, setSortBy] = useState(() => { try { return localStorage.getItem('apply.sort') || 'built' } catch { return 'built' } })
+  useEffect(() => { try { localStorage.setItem('apply.sort', sortBy) } catch { /* private mode */ } }, [sortBy])
+  const cfg = useAsync(() => api.get('/api/settings'))
+  const target = cfg.data?.ats_target ?? 80
   const [onePdf, setOnePdf] = useState(null)
   const builds = useActiveBuilds()                      // asked from the app: still right after you come back
   const toast = useToast()
@@ -188,11 +200,21 @@ export default function Apply() {
     catch (e) { toast(e.message, 'error') }
   }
 
+  const notApplying = async (id, undo = false) => {
+    try {
+      await api.post(`/api/apply/jobs/${id}/not-applying${undo ? '?undo=true' : ''}`); q.reload(); act.reload()
+      toast(undo ? 'Back in To apply' : 'Moved to Not applying – Undo there if you change your mind')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
   const allJobs = q.data?.jobs || []
-  const counts = { todo: allJobs.filter((j) => !j.applied).length, applied: allJobs.filter((j) => j.applied).length, all: allJobs.length }
-  const jobs = tab === 'todo' ? allJobs.filter((j) => !j.applied) : tab === 'applied' ? allJobs.filter((j) => j.applied) : allJobs
+  const isTodo = (j) => !j.applied && !j.not_applying
+  const counts = { todo: allJobs.filter(isTodo).length, applied: allJobs.filter((j) => j.applied).length,
+    skip: allJobs.filter((j) => j.not_applying).length, all: allJobs.length }
+  const jobs = sortJobs(tab === 'todo' ? allJobs.filter(isTodo) : tab === 'applied' ? allJobs.filter((j) => j.applied)
+    : tab === 'skip' ? allJobs.filter((j) => j.not_applying) : allJobs, sortBy)
   const chosen = useMemo(() => allJobs.filter((j) => sel?.has(j.id)), [allJobs, sel])
-  const chosenTodo = chosen.filter((j) => !j.applied)
+  const chosenTodo = chosen.filter((j) => isTodo(j) && !j.pdf_missing && j.link)
   const toggle = (id) => { const n = new Set(sel); n.has(id) ? n.delete(id) : n.add(id); setSel(n) }
   const start = async () => {
     try { setSt(await api.post('/api/apply/start', { job_ids: chosenTodo.map((j) => j.id) })); toast(`Applying to ${chosenTodo.length} job(s) – a Chrome window opens`) }
@@ -232,24 +254,29 @@ export default function Apply() {
       <div className="overflow-hidden glass rounded-2xl">
         <div className="flex flex-wrap items-center gap-2 px-5 pt-3">
           <div className="mr-auto"><div className="text-sm font-semibold text-navy">Your jobs with a finished CV</div>
-            <div className="text-xs muted">Best score first. Apply to up to {q.data?.limit ?? 20} a day (change in Settings). Wrongly marked as applied? Open <b>Applied</b> and press <b>Not applied</b>.</div></div>
+            <div className="text-xs muted">Every CV you built. Apply to up to {q.data?.limit ?? 20} a day (change in Settings). Not going to apply? Press <Archive size={11} className="inline" /> on the row. Wrongly marked as applied? Open <b>Applied</b> and press <b>Not applied</b>.</div></div>
+          <label className="flex items-center gap-1.5 text-xs text-slate-500">Sort
+            <select className="input w-auto py-1 text-xs" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort">
+              {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
           <button className="btn-ghost text-xs" onClick={() => setSel(new Set([...(sel || []), ...jobs.map((j) => j.id)]))}>Tick all</button>
           <button className="btn-ghost text-xs" onClick={() => setSel(new Set())}>Untick all</button>
           <SureButton className="btn-outline disabled:opacity-50" disabled={!chosen.length} ask={`Rebuild ${chosen.length} ticked job(s)? Click again`} onClick={() => chosen.length && rebuild(chosen.map((j) => j.id))} title="Write a new CV and cover letter for the jobs you ticked, one after another (the old files are kept in _old_versions)"><RefreshCw size={14} />Rebuild ticked ({chosen.length})</SureButton>
           <button className="btn-outline" disabled={!chosenTodo.length || st?.running} onClick={start} title="The app opens its own Chrome window and goes through the ticked jobs"><MonitorPlay size={14} />Use the app's Chrome window ({chosenTodo.length})</button>
         </div>
-        <div className="px-5"><Tabs value={tab} onChange={setTab} tabs={[{ id: 'todo', label: 'To apply', count: counts.todo }, { id: 'applied', label: 'Applied', count: counts.applied }, { id: 'all', label: 'All', count: counts.all }]} /></div>
-        {!jobs.length ? <Empty title={tab === 'applied' ? 'Nothing applied yet' : 'Nothing to apply to'}>{tab === 'applied' ? 'Jobs you sent show up here.' : 'Build CVs for jobs first (Job board → Build CV).'}</Empty> : (
+        <div className="px-5"><Tabs value={tab} onChange={setTab} tabs={[{ id: 'todo', label: 'To apply', count: counts.todo }, { id: 'applied', label: 'Applied', count: counts.applied }, { id: 'skip', label: 'Not applying', count: counts.skip }, { id: 'all', label: 'All', count: counts.all }]} /></div>
+        {!jobs.length ? <Empty title={tab === 'applied' ? 'Nothing applied yet' : tab === 'skip' ? 'Nothing here' : 'Nothing to apply to'}>{tab === 'applied' ? 'Jobs you sent show up here.' : tab === 'skip' ? 'Jobs you marked “Not applying” show up here; Undo puts one back.' : 'Build CVs for jobs first (Job board → Build CV).'}</Empty> : (
           <div className="divide-y divide-slate-100">
             {jobs.map((j) => {
               const busy = !!builds.byJob[j.id]
               const att = ATTEMPT(j.last_attempt)
               return (
-              <label key={j.id} className={`grid cursor-pointer grid-cols-[24px_48px_minmax(0,1fr)_96px_170px_96px_170px_24px] items-center gap-3 px-5 py-3 ${st?.current?.id === j.id && st?.running ? 'bg-teal-50' : j.applied ? 'bg-emerald-50/30 hover:bg-emerald-50/60' : 'hover:bg-slate-50'}`}>
+              <label key={j.id} data-testid="apply-row" className={`grid cursor-pointer grid-cols-[24px_56px_minmax(0,1fr)_96px_170px_96px_170px_24px_24px] items-center gap-3 px-5 py-3 ${st?.current?.id === j.id && st?.running ? 'bg-teal-50' : j.applied ? 'bg-emerald-50/30 hover:bg-emerald-50/60' : j.not_applying ? 'opacity-70 hover:bg-slate-50' : 'hover:bg-slate-50'}`}>
                 <input type="checkbox" className="accent-teal" checked={!!sel?.has(j.id)} onChange={() => toggle(j.id)} disabled={st?.running} />
-                <ScorePill score={j.score} />
+                <AtsPill ats={j.ats} target={target} match={j.score} />
                 <div className="min-w-0"><div className="truncate font-semibold text-slate-800">{j.title}</div>
                   <div className="truncate text-xs text-slate-500">{j.company}{j.location ? ` · ${j.location}` : ''}
+                    {j.built_at && <span className="ml-2 text-slate-400" title="When this CV was built">Built {fmtDateTime(j.built_at)}</span>}
+                    {j.pdf_missing && <span className="ml-2 text-amber-700" title="Forms need the PDF: rebuild, or check that Word or LibreOffice is installed">no PDF</span>}
                     {j.applied && <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">applied {fmtDate(j.applied_at)}</span>}
                     {!j.applied && att && <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200" title={`Last try: ${fmtDateTime(j.last_attempt.at)}`}>last try: {att}</span>}</div>
                   <BuildingNote b={builds.byJob[j.id]} onStopped={builds.reload} /></div>
@@ -270,9 +297,15 @@ export default function Apply() {
                   : act.data?.job?.id === j.id
                   ? <button className="btn border border-rose-200 bg-slate-50 py-1.5 text-xs text-rose-700 hover:bg-rose-50" title="Stop applying to this job"
                       onClick={(e) => { e.preventDefault(); stopBrowser() }}><Square size={11} />Stop applying</button>
-                  : <button className="btn bg-teal py-1.5 text-xs text-white hover:bg-teal-600 disabled:opacity-50" disabled={busy} title="Opens the job in your browser; the extension fills the form"
+                  : j.not_applying
+                  ? <button className="btn border border-slate-200 bg-slate-50 py-1.5 text-xs text-slate-600" title="Put it back in To apply"
+                      onClick={(e) => { e.preventDefault(); notApplying(j.id, true) }}><Undo2 size={12} />Undo</button>
+                  : <button className="btn bg-teal py-1.5 text-xs text-white hover:bg-teal-600 disabled:opacity-50" disabled={busy || j.pdf_missing || !j.link}
+                      title={!j.link ? 'No link to the job posting' : j.pdf_missing ? 'No PDF of the CV yet' : 'Opens the job in your browser; the extension fills the form'}
                       onClick={(e) => { e.preventDefault(); applyInBrowser(j) }}><Play size={12} />Apply in my browser</button>}
-                <a href={j.link} target="_blank" rel="noreferrer" title="Open posting" onClick={(e) => e.stopPropagation()} className="text-slate-400 hover:text-teal-600"><ExternalLink size={14} /></a>
+                {j.link ? <a href={j.link} target="_blank" rel="noreferrer" title="Open posting" onClick={(e) => e.stopPropagation()} className="text-slate-400 hover:text-teal-600"><ExternalLink size={14} /></a> : <span />}
+                {isTodo(j) ? <button type="button" className="text-slate-400 hover:text-rose-600" title="Not applying – take it off this list (Undo in the Not applying tab)" aria-label={`Not applying to ${j.title}`}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); notApplying(j.id) }}><Archive size={14} /></button> : <span />}
               </label>)})}
           </div>)}
       </div>

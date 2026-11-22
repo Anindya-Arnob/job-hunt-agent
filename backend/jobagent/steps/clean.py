@@ -248,6 +248,9 @@ def delete_jobs(job_ids: list[int], delete_files: bool = False, forget: bool = F
             if not forget:
                 s.add(m.DeletedJob(url_key=job.url_key, dedupe_key=job.dedupe_key, company=job.company, title=job.title))
             s.delete(job)
+            row = s.get(m.AppSetting, f"stopped:{job.id}")     # off the Stopped tab
+            if row:
+                s.delete(row)
             removed += 1
     return {"deleted": removed, "files_deleted": files_removed}
 

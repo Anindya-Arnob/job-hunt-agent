@@ -132,8 +132,9 @@ def read(job: m.Job) -> tuple[AdRead, bool]:
         return ad, False
     ad = clean(ad)
     _save(job.id, ad)
-    apply_to_job(job.id, ad)
-    learn(ad, f"{job.company} – {job.title}")
+    before = _score_of(job.id)
+    learn(ad, f"{job.company} – {job.title}")        # the new words first, so the score after counts them
+    apply_to_job(job.id, ad, before)
     return ad, True
 
 
@@ -162,8 +163,43 @@ def must_groups(ad: Optional[AdRead]) -> list[list[str]]:
     return [g.any_of for g in ad.required if g.must] if ad else []
 
 
-def apply_to_job(job_id: int, ad: AdRead) -> None:
-    """The job card shows Claude's list; the free score of this job is redone with it."""
+def _score_of(job_id: int) -> Optional[int]:
+    from sqlmodel import select
+    with db.session_scope() as s:
+        sc = s.exec(select(m.Score).where(m.Score.job_id == job_id)).first()
+        return sc.total if sc else None
+
+
+def checked(job_id: int) -> Optional[dict]:
+    """{"before", "after", "at"}: the job's score before and after Claude read the ad."""
+    try:
+        with db.session_scope() as s:
+            row = s.get(m.AppSetting, f"claude_check:{job_id}")
+            return json.loads(row.value) if row and row.value else None
+    except Exception:
+        return None
+
+
+def check(job_id: int, again: bool = False) -> dict:
+    """The Claude check button: read the ad (or read it again), update the score, nothing built."""
+    with db.session_scope() as s:
+        job = s.get(m.Job, job_id)
+        if job is None:
+            raise KeyError(job_id)
+        s.expunge(job)
+    if again and cached(job_id) is not None:
+        with db.session_scope() as s:
+            row = s.get(m.AppSetting, _key(job_id))
+            if row:
+                s.delete(row)
+    ad, by_claude = read(job)
+    return {"read_by_claude": by_claude, "score": _score_of(job_id), "check": checked(job_id),
+            "must_have": must_groups(ad) if by_claude else []}
+
+
+def apply_to_job(job_id: int, ad: AdRead, before: Optional[int] = None) -> None:
+    """The job card shows Claude's list; the free score of this job is redone with it (before -> after kept)."""
+    before = _score_of(job_id) if before is None else before
     with db.session_scope() as s:
         j = s.get(m.Job, job_id)
         if not j:
@@ -172,6 +208,13 @@ def apply_to_job(job_id: int, ad: AdRead) -> None:
         j.keywords = list(dict.fromkeys(required_terms(ad) + ad.nice_to_have))[:30]
         s.add(j)
     _rescore([job_id])
+    prev = checked(job_id)
+    with db.session_scope() as s:
+        key = f"claude_check:{job_id}"
+        row = s.get(m.AppSetting, key) or m.AppSetting(key=key)
+        row.value = json.dumps({"before": prev["before"] if prev else before, "after": _score_of(job_id),
+                                "at": datetime.now().astimezone().isoformat(timespec="seconds")})
+        s.add(row)
 
 
 def _rescore(job_ids: Optional[list[int]] = None) -> int:

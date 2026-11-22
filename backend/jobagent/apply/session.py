@@ -60,38 +60,71 @@ def _host(link: str) -> str:
     return h[4:] if h.startswith("www.") else h
 
 
+NOT_APPLYING = "Not applying"
+
+
 def queue(limit: Optional[int] = None, include_all: bool = False) -> list[dict]:
-    """Jobs with a finished CV. Default: not applied yet, best score first, max the daily limit.
-    include_all: every built AND applied job (applied ones last), with the last apply attempt."""
+    """Jobs with a finished CV, newest build first. Default: not applied yet, max the daily limit.
+    include_all: every built job: to apply, applied and the ones you marked "Not applying", with the last apply
+    attempt, the ATS score of the CV and when it was built."""
     limit = limit or settings.apply_daily_limit
     with db.session_scope() as s:
         docs: dict[int, dict] = {}
-        for d in s.exec(select(m.Document)).all():
-            path = d.pdf_path if d.pdf_path and Path(d.pdf_path).exists() else ""   # forms get the PDF only
-            if path:
-                docs.setdefault(d.job_id, {})[d.kind] = path
+        for d in s.exec(select(m.Document).order_by(m.Document.id)).all():
+            pdf = d.pdf_path if d.pdf_path and Path(d.pdf_path).exists() else ""   # forms get the PDF only
+            x = docs.setdefault(d.job_id, {})
+            if pdf:
+                x[d.kind] = pdf
+            elif d.docx_path and Path(d.docx_path).exists():
+                x.setdefault(d.kind + "_docx", d.docx_path)
+            if d.kind == "cv":
+                x["built_at"] = d.built_at.isoformat() if d.built_at else None
+                x["ats"] = (((d.content or {}).get("_ats") or {}).get("after") or {}).get("score")
         last: dict[int, m.ApplyAttempt] = {}
         for a in s.exec(select(m.ApplyAttempt).order_by(m.ApplyAttempt.id)).all():
             last[a.job_id] = a
-        states = [m.JobStatus.BUILT, m.JobStatus.APPLIED] if include_all else [m.JobStatus.BUILT]
-        jobs = s.exec(select(m.Job).where(m.Job.status.in_(states))).all()
+        q = select(m.Job).where(m.Job.status.in_([m.JobStatus.BUILT, m.JobStatus.APPLIED]))
+        jobs = list(s.exec(q).all()) if include_all else \
+            list(s.exec(select(m.Job).where(m.Job.status == m.JobStatus.BUILT)).all())
+        if include_all:
+            jobs += s.exec(select(m.Job).where(m.Job.status == m.JobStatus.EXCLUDED,
+                                               m.Job.exclude_reason == NOT_APPLYING)).all()
         scores = {sc.job_id: sc for sc in s.exec(select(m.Score)).all()}
         apps = {a.job_id: a for a in s.exec(select(m.Application)).all()}
         out = []
         for j in jobs:
             d = docs.get(j.id, {})
-            if "cv" not in d or not j.link:
+            if "cv" not in d and "cv_docx" not in d:
                 continue
             sc, la, ap = scores.get(j.id), last.get(j.id), apps.get(j.id)
-            out.append({"id": j.id, "title": j.title, "company": j.company or _host(j.link), "location": j.location,
+            out.append({"id": j.id, "title": j.title, "company": j.company or _host(j.link or ""), "location": j.location,
                         "job_type": j.job_type, "link": j.link, "score": sc.total if sc else None,
-                        "verdict": sc.verdict if sc else None, "cv": d.get("cv"), "letter": d.get("letter"),
+                        "verdict": sc.verdict if sc else None, "cv": d.get("cv") or d.get("cv_docx"),
+                        "letter": d.get("letter") or d.get("letter_docx"),
+                        "pdf_missing": "cv" not in d, "built_at": d.get("built_at"), "ats": d.get("ats"),
                         "applied": j.status == m.JobStatus.APPLIED,
+                        "not_applying": j.status == m.JobStatus.EXCLUDED,
                         "applied_at": ap.applied_at.isoformat() if ap and ap.applied_at else None,
                         "last_attempt": {"status": la.status, "note": la.note, "at": la.started_at.isoformat() if la.started_at else None,
                                          "screenshot": la.screenshot} if la else None})
-    out.sort(key=lambda x: (x["applied"], -(x["score"] or 0)))
-    return out if include_all else out[:limit]
+    out.sort(key=lambda x: x["built_at"] or "", reverse=True)
+    out.sort(key=lambda x: (x["applied"], x["not_applying"]))
+    if not include_all:
+        out = [x for x in out if not x["pdf_missing"] and x["link"]][:limit]
+    return out
+
+
+def set_not_applying(job_id: int, on: bool) -> None:
+    """You decided not to apply: off the To apply list (on the Job board under Excluded). Undo puts it back."""
+    with db.session_scope() as s:
+        j = s.get(m.Job, job_id)
+        if not j:
+            raise KeyError(job_id)
+        if on:
+            j.status, j.exclude_reason = m.JobStatus.EXCLUDED, NOT_APPLYING
+        elif j.exclude_reason == NOT_APPLYING:
+            j.status, j.exclude_reason = m.JobStatus.BUILT, ""
+        s.add(j)
 
 
 def mark_not_applied(job_id: int) -> None:

@@ -125,6 +125,7 @@ def job_dict(j: m.Job, sc: Optional[m.Score] = None, full: bool = False, ko=None
         from ..steps import adread
         from ..steps import knockouts as K
         d["read_by_claude"] = adread.cached(j.id) is not None
+        d["claude_check"] = adread.checked(j.id)
         d["missing_tools"] = K.missing_tools(j, ko[0]) if ko else []
     if kos:
         d["verdict"] = "Skip"                       # a knock-out: unlikely, whatever the fit score
@@ -546,6 +547,9 @@ def list_jobs(tab: str = "all", verdict: Optional[str] = None, min_score: Option
             query = query.where(m.Job.status == "needs_review")
         elif tab == "excluded":
             query = query.where(m.Job.status == "excluded")
+        elif tab == "stopped":
+            from ..steps import stops
+            query = query.where(m.Job.id.in_(list(stops.all_stops())), m.Job.status.in_(STOPPABLE))
         elif tab in ("all", "email"):
             query = query.where(m.Job.status != "excluded")
         if status:
@@ -562,6 +566,8 @@ def list_jobs(tab: str = "all", verdict: Optional[str] = None, min_score: Option
             kinds.setdefault(jid_, set()).add(kind)
     out = []
     ko = _ko_context()
+    from ..steps import stops
+    stopped = stops.all_stops()
     for j in jobs:
         sc = scores.get(j.id)
         d = job_dict(j, sc, ko=ko)
@@ -577,14 +583,20 @@ def list_jobs(tab: str = "all", verdict: Optional[str] = None, min_score: Option
             continue
         if hide_hard_blockers and ((sc and any(x.get("hard") for x in sc.deal_breakers)) or d["knockouts"]):
             continue
+        if j.id in stopped and j.status in STOPPABLE:
+            d["stopped"] = stopped[j.id]
         d["has_cv"] = "cv" in kinds.get(j.id, ())
         d["has_letter"] = "letter" in kinds.get(j.id, ())
         out.append(d)
-    out.sort(key=lambda d: -(d["score"] if d["score"] is not None else -1))
+    if tab == "stopped":
+        out.sort(key=lambda d: d["stopped"]["at"], reverse=True)
+    else:
+        out.sort(key=lambda d: -(d["score"] if d["score"] is not None else -1))
     return out
 
 
 APPLIED_STATES = ["applied", "interview", "offer", "rejected"]
+STOPPABLE = ["new", "scored", "needs_review"]          # a stop counts while no CV was built
 
 
 @app.get("/api/sites/{site}/mode")
@@ -720,6 +732,19 @@ async def apply_one_pdf(job_id: int, body: OnePdfIn):
         return await asyncio.to_thread(A.application_pdf, job_id, body.letter, body.cv, body.attachment_ids)
     except A.AttachmentError as e:
         _err(e)
+
+
+@app.post("/api/apply/jobs/{job_id}/not-applying")
+def apply_not_applying(job_id: int, undo: bool = False):
+    """You won't apply to this job: off To apply (Job board: Excluded, 'Not applying'). undo=true puts it back."""
+    from ..apply import bridge, session as AS
+    if not undo and (bridge.active().get("job") or {}).get("id") == job_id:
+        bridge.set_active(None)
+    try:
+        AS.set_not_applying(job_id, not undo)
+    except KeyError:
+        raise HTTPException(404, "job not found")
+    return {"ok": True}
 
 
 @app.post("/api/apply/jobs/{job_id}/applied")
@@ -1011,9 +1036,12 @@ def job_counts():
         by = dict(s.exec(select(m.Job.status, func.count()).group_by(m.Job.status)).all())
         email = sum(1 for st, src in s.exec(select(m.Job.status, m.Job.sources).where(m.Job.status != "excluded")).all()
                     if any(str(x).startswith("email") for x in (src or [])))
+        from ..steps import stops
+        ids = list(stops.all_stops())
+        n_stopped = s.exec(select(func.count()).select_from(m.Job).where(m.Job.id.in_(ids), m.Job.status.in_(STOPPABLE))).one() if ids else 0
     g = lambda *ks: sum(by.get(k, 0) for k in ks)
     return {"new": g("new", "scored"), "built": g("built"), "applied": g(*APPLIED_STATES),
-            "review": g("needs_review"), "excluded": g("excluded"), "email": email,
+            "review": g("needs_review"), "excluded": g("excluded"), "email": email, "stopped": n_stopped,
             "all": sum(v for k, v in by.items() if k != "excluded")}
 
 
@@ -1139,6 +1167,9 @@ async def start_build(body: BuildIn):
     if not cvs.get_main() and not body.cv_profile_id:
         _err(ValueError("Upload your main CV first (My CV screen)."))
     stopped = {} if body.force else knockouts_for(body.job_ids)      # stop before any token is spent
+    from ..steps import stops
+    for k, v in stopped.items():
+        stops.record(k, v)
     todo = [j for j in body.job_ids if j not in stopped]
     with db.session_scope() as s:
         names = {k: (lambda j: f"{j.company} – {j.title}" if j else "")(s.get(m.Job, k)) for k in stopped}
@@ -1187,10 +1218,27 @@ async def boost_apply(job_id: int, body: BoostIn):
     if not body.force:
         stopped = knockouts_for([job_id])
         if stopped:
+            from ..steps import stops
+            stops.record(job_id, stopped[job_id])
             return {**out, "run_id": None, "already_building": [],
                     "stopped": [{"job_id": job_id, "job": company, "reasons": stopped[job_id]}]}
     run_id, already = await runs.start_build([job_id], None, True, force=[job_id] if body.force else None)
     return {**out, "run_id": run_id, "already_building": already, "stopped": []}
+
+
+@app.post("/api/jobs/{job_id}/claude-check")
+async def claude_check(job_id: int, again: bool = False):
+    """Claude reads this ad (small model, once) and the job's score and knock-outs are updated. Nothing is built."""
+    from ..steps import adread
+    if not adread.can_read():
+        _err(ValueError("Claude Code is not logged in – log in (top left) to let Claude read the ad"))
+    try:
+        out = await asyncio.to_thread(adread.check, job_id, again)
+    except KeyError:
+        raise HTTPException(404, "job not found")
+    if not out["read_by_claude"]:
+        _err(ValueError("Claude could not read the ad right now (see Runs & coverage) – the word list is still used"))
+    return out
 
 
 # ------------------------------------------------- words Claude taught the matcher ---

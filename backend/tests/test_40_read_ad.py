@@ -199,5 +199,30 @@ def test_i_have_this_adds_it_and_builds(setup, claude_reads):  # noqa: F811
                 break
             time.sleep(0.25)
         assert not c.get(f"/api/jobs/{jid}").json()["missing_tools"]
+        assert c.get(f"/api/jobs/{jid}").json()["status"] == "built"
+        assert c.get("/api/jobs/counts").json()["stopped"] == 0, c.get("/api/jobs?tab=stopped").json()
     prof, _ = CV.get_main()
     assert "OR-Tools" in [i for g in prof.skills for i in g.items]
+
+
+def test_claude_check_reads_only_and_shows_the_score_change(setup, claude_reads, monkeypatch):  # noqa: F811
+    from fastapi.testclient import TestClient
+    from jobagent.api.main import app
+    from jobagent.steps import adread
+    jid = _sap_job(setup)
+    with TestClient(app) as c:
+        before = c.get(f"/api/jobs/{jid}").json()["score"]
+        r = c.post(f"/api/jobs/{jid}/claude-check").json()
+        assert r["read_by_claude"] and r["must_have"] == [["Python"], ["Gurobi", "CPLEX", "Xpress", "OR-Tools"]]
+        d = c.get(f"/api/jobs/{jid}").json()
+        assert d["claude_check"]["before"] == before and d["claude_check"]["after"] == d["score"] < before
+        assert d["read_by_claude"] and d["missing_tools"] and not d["documents"]          # nothing built
+        assert len(claude_reads) == 1
+        c.post(f"/api/jobs/{jid}/claude-check?again=true")                          # read again on purpose
+        assert len(claude_reads) == 2
+        assert c.get(f"/api/jobs/{jid}").json()["claude_check"]["before"] == before    # still the first score
+        r = c.post("/api/build", json={"job_ids": [jid]}).json()                       # read already: stops at once
+        assert r["run_id"] is None and "Gurobi" in r["stopped"][0]["reasons"][0]
+        assert c.post("/api/jobs/99999/claude-check").status_code == 404
+        monkeypatch.setattr(adread, "can_read", lambda: False)
+        assert "not logged in" in c.post(f"/api/jobs/{jid}/claude-check").json()["detail"]

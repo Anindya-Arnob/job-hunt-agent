@@ -274,6 +274,8 @@ def next_job(state: BuildState) -> dict:
         forced = jid in (state.get("force") or [])
 
         def stop(kos):
+            from ..steps import stops
+            stops.record(jid, kos)
             why = "; ".join(kos)
             results.append({"job_id": jid, "status": "stopped", "reason": f"Knock-out: {why}"})
             events.emit({"type": "build", "message": f"{job.company} – {job.title}: not built. Knock-out: {why}. "
@@ -626,6 +628,8 @@ def save(state: BuildState) -> dict:
                 if p and p not in keep and Path(p).exists():
                     retire_file(Path(p))            # an earlier version of this job's CV/letter
             s.delete(old)
+        from ..steps import stops
+        stops.clear(jid)                             # built: no longer on the Stopped tab
         s.add(m.Document(job_id=jid, cv_version_id=vid, kind="cv", docx_path=files.get("cv.docx", ""),
                          pdf_path=files.get("cv.pdf", ""), content={**state["cv"], **meta}, qa_results=state.get("qa_cv", []),
                          qa_passed=cv_ok, attempts=state.get("attempts", 1)))

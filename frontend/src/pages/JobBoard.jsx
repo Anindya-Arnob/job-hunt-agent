@@ -4,6 +4,7 @@ import { AgGridReact } from 'ag-grid-react'
 import {
   ArrowDown, ArrowUp, Bookmark, BookmarkPlus, Check, Columns3, Download, ExternalLink, FileText, Hammer, Mail,
   RefreshCw, RotateCcw, Rows2, Rows3, Search, SlidersHorizontal, Trash2, X,
+  Sparkles, Loader2,
 } from 'lucide-react'
 import { api, fmtDate, fmtDateTime, SOURCE_LABEL, stoppedText } from '../api'
 import HaveThis from '../components/HaveThis'
@@ -13,6 +14,7 @@ import { useOnEvent } from '../events'
 // ───────────────────────── constants ─────────────────────────
 const TABS = [
   { id: 'new', label: 'New', hint: 'Scored jobs without a CV yet' },
+  { id: 'stopped', label: 'Stopped', hint: 'You clicked Build CV and a knock-out stopped it – open one for “I have this” or “Build anyway”' },
   { id: 'built', label: 'CV built', hint: 'A tailored CV exists, not applied yet' },
   { id: 'applied', label: 'Applied', hint: 'Applied, interview, offer or rejected' },
   { id: 'review', label: 'Needs review', hint: 'Job type unclear – tell the app what it is' },
@@ -331,6 +333,14 @@ export default function JobBoard() {
                 hidden.includes('mode') && p.data._mode && !(p.data.location || '').toLowerCase().includes(p.data._mode.toLowerCase()) && <span key="m">{p.data._mode}</span>]
                 .filter(Boolean).map((el, i) => <span key={i}>{i > 0 && <span className="mx-1.5 text-slate-300">•</span>}{el}</span>)}</div>
           </div> },
+      ...(tab === 'stopped' ? [
+        { colId: 'stopReason', field: 'stopped', headerName: 'Why it stopped', ...w('stopReason', { flex: 2, minWidth: 260 }), sortable: false,
+          cellRenderer: (p) => <span className="truncate text-xs text-rose-700" title={(p.value?.reasons || []).join('\n')}>⛔ {(p.value?.reasons || [])[0]}
+            {(p.value?.reasons || []).length > 1 && <span className="text-slate-400"> +{p.value.reasons.length - 1}</span>}</span> },
+        { colId: 'stoppedAt', field: 'stopped', headerName: 'Stopped', ...w('stoppedAt', { width: 146 }),
+          comparator: (a, b) => (a?.at || '').localeCompare(b?.at || ''),
+          cellRenderer: (p) => p.value?.at ? <span className="text-xs text-slate-600">{fmtDate(p.value.at)} · {new Date(p.value.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span> : null },
+      ] : []),
       { colId: 'company', field: 'company', headerName: 'Company', ...w('company', { flex: 1, minWidth: 150 }),
         comparator: (a, b) => (a || '').localeCompare(b || '', undefined, { sensitivity: 'base' }), cellClass: 'font-medium text-slate-700' },
       { colId: 'verdict', field: 'verdict', headerName: 'Verdict', ...w('verdict', { width: 160 }),
@@ -370,6 +380,18 @@ export default function JobBoard() {
     ]
     return c.map((d) => ({ ...d, hide: hidden.includes(d.colId), sort: sort.key === d.colId ? sort.dir : null }))
   }, [tab, hidden, sort, compact, widths]) // eslint-disable-line
+
+  useEffect(() => {        // the grid keeps its column order: put "why it stopped" next to the job, not at the far right
+    if (tab !== 'stopped') return
+    const t = setTimeout(() => {
+      try {
+        const g = grid.current?.api
+        const at = g.getAllGridColumns().findIndex((c) => c.getColId() === 'title')
+        g.moveColumns(['stopReason', 'stoppedAt'], at + 1)
+      } catch { /* grid not ready */ }
+    }, 0)
+    return () => clearTimeout(t)
+  }, [tab, cols])
 
   const onSortChanged = (e) => {
     const s = e.api.getColumnState().find((c) => c.sort)
@@ -641,6 +663,7 @@ export function DeleteModal({ jobs, onClose, onDone }) {
 
 export function JobDetail({ id, onClose, onChanged, onDelete }) {
   const [j, setJ] = useState(null)
+  const [checking, setChecking] = useState(false)
   const toast = useToast()
   const nav = useNavigate()
   const load = useCallback(() => api.get(`/api/jobs/${id}`).then(setJ), [id])
@@ -655,6 +678,17 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
       toast((r.already_building || []).length ? 'Already being built – not started twice' : 'Building CV and cover letter'); nav('/build')
     }
     catch (e) { toast(e.message, 'error') }
+  }
+  const claudeCheck = async () => {
+    setChecking(true)
+    try {
+      const r = await api.post(`/api/jobs/${id}/claude-check${j.read_by_claude ? '?again=true' : ''}`)
+      const c = r.check
+      toast(`Claude check: score ${c && c.before !== null && c.before !== c.after ? `${c.before} → ${c.after}` : r.score}` +
+        (r.must_have?.length ? ` · must have: ${r.must_have.map((g) => g.join(' or ')).join('; ')}` : ''))
+      await load(); onChanged && onChanged()
+    } catch (e) { toast(e.message, 'error') }
+    setChecking(false)
   }
   const bars = b && [['Skills & tools', b.skills, 40], ['Experience & projects', b.experience, 25], ['Title fit', b.title_fit, 10],
     ['Education', b.education, 10], ['Language', b.language, 10], ['Type & location', b.type_location, 5]]
@@ -688,7 +722,9 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
           </div>
         )}
         {j.status === 'excluded' && <div className="rounded-md bg-slate-100 p-3">Excluded: <b>{j.exclude_reason}</b>
-          <button className="btn-outline ml-2" onClick={() => patch({ status: 'new' })}>Include anyway</button></div>}
+          {j.exclude_reason === 'Not applying'
+            ? <button className="btn-outline ml-2" onClick={async () => { await api.post(`/api/apply/jobs/${id}/not-applying?undo=true`); await load(); onChanged && onChanged() }}>Back to To apply</button>
+            : <button className="btn-outline ml-2" onClick={() => patch({ status: 'new' })}>Include anyway</button>}</div>}
         {b && (
           <div>
             <div className="mb-2 flex items-baseline justify-between"><span className="label">Match score</span><span className="text-2xl font-bold text-navy">{j.score}<span className="text-sm muted">/100</span></span></div>
@@ -696,6 +732,9 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
               <div key={l} className="flex items-center gap-2"><span className="w-40 text-xs">{l}</span>
                 <div className="h-1.5 flex-1 rounded bg-slate-200"><div className="h-1.5 rounded bg-teal" style={{ width: `${(v / mx) * 100}%` }} /></div>
                 <span className="w-12 text-right text-xs tabular-nums">{v}/{mx}</span></div>))}</div>
+            {j.claude_check && j.claude_check.before !== null && j.claude_check.before !== j.claude_check.after && (
+              <p className="mt-2 text-xs" data-testid="claude-check-result" title={`Claude read the ad ${fmtDateTime(j.claude_check.at)}`}>
+                <Sparkles size={11} className="mr-1 inline text-teal-600" />After Claude read the ad: <b>{j.claude_check.before} → {j.claude_check.after}</b></p>)}
             {j.rationale && <p className="mt-2 text-xs muted">{j.rationale}</p>}
             {j.score_outdated && <p className="mt-1 text-xs text-amber-700">Scored against an older CV version – re-score on the Runs screen.</p>}
           </div>
@@ -731,6 +770,10 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
         {j.links.map((l, i) => <a key={l} href={l} target="_blank" rel="noreferrer" className="btn-outline"><ExternalLink size={14} />Posting{j.links.length > 1 ? ` ${i + 1}` : ''}</a>)}
         {onDelete && <button className="btn-danger" title="Delete this job" onClick={() => onDelete(j)}><Trash2 size={14} /></button>}
         <div className="ml-auto flex gap-2">
+          {!j.documents?.length && (
+            <button className="btn-outline" disabled={checking} onClick={claudeCheck} data-testid="claude-check"
+              title={j.read_by_claude ? 'Claude reads the ad again and updates the score (a small model, a few tokens)' : 'Claude reads only the ad and updates the score and knock-outs – no CV is built (a small model, a few tokens)'}>
+              {checking ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{checking ? 'Reading…' : j.read_by_claude ? 'Check again' : 'Claude check'}</button>)}
           {j.documents?.length ? <button className="btn-outline" onClick={() => build(true)}>Rebuild</button>
             : <button className="btn-teal" disabled={!j.score} onClick={() => build(false)}><Hammer size={14} />Build CV</button>}
           {['built', 'scored'].includes(j.status) && <button className="btn-primary" onClick={() => patch({ status: 'applied' })}>Mark applied</button>}
