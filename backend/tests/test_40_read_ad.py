@@ -268,3 +268,26 @@ def test_claude_check_stops_when_claude_cannot_read(setup, monkeypatch):  # noqa
         run = c.get(f"/api/runs/{r['run_id']}").json()
         run = run.get("run", run)
         assert run["status"] == "failed" and run["counts"]["checked"] == 0 and "could not read" in run["errors"][0]
+
+
+def test_reading_an_ad_runs_without_thinking(monkeypatch):
+    """Measured on a real PC: with thinking on, one ad took ~2 minutes and 7,000-15,000 output tokens."""
+    import json as _json
+    import subprocess
+    from jobagent import claude_code as cc
+    seen = []
+
+    def run(cmd, prompt, cwd, timeout=420, env=None):
+        seen.append(env)
+        body = {"result": READ.model_dump_json(), "usage": {"input_tokens": 900, "output_tokens": 250},
+                "modelUsage": {"claude-haiku": {}}, "duration_ms": 4200}
+        return subprocess.CompletedProcess(cmd, 0, _json.dumps(body).encode(), b"")
+    monkeypatch.setattr(cc, "exe", lambda: "claude")
+    monkeypatch.setattr(cc, "flags", lambda *a, **k: ([], True))
+    monkeypatch.setattr(llm, "_run_claude", run)
+    got = llm._cli_structured("read_ad", A.AdRead, "sys", "ad")
+    assert got.required[1].any_of[0] == "Gurobi"
+    assert seen[0]["MAX_THINKING_TOKENS"] == "0"
+    assert llm.usage_log[-1]["models"] == ["claude-haiku"] and llm.usage_log[-1]["seconds"] == 4.2
+    llm._cli_structured("place_facts", A.AdRead, "sys", "x")
+    assert seen[1] is None                                   # the CV steps keep their own setting

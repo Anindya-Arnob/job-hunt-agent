@@ -11,6 +11,7 @@ run before it goes over.
 from __future__ import annotations
 
 import json
+import os
 import logging
 import threading
 from dataclasses import dataclass, field
@@ -130,13 +131,14 @@ def kill_run(run_id: int) -> int:
     return len(procs)
 
 
-def _run_claude(cmd: list, prompt: str, cwd: str, timeout: int = 420):
+def _run_claude(cmd: list, prompt: str, cwd: str, timeout: int = 420, env: Optional[dict] = None):
     """subprocess.run, but registered under the current run so Stop can end it."""
     import subprocess
     rid = current_run()
     if rid in _stopped:
         raise LLMUnavailable("Stopped by you")
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd,
+                         env={**os.environ, **env} if env else None)
     with _procs_lock:
         _procs.setdefault(rid, set()).add(p)
     try:
@@ -202,6 +204,12 @@ def _chat(model: str, max_tokens: int):
 QUICK_RULE = ("SPEED RULE: write the JSON answer straight away. Do not plan, draft or check it in your head first; "
               "one pass is enough.\n\n")
 
+# Listing an ad's skills needs no thinking. Measured on a real PC: with thinking on, each ad took ~2 minutes and
+# 7,000-15,000 output tokens for a ~300-token list. MAX_THINKING_TOKENS=0 turns thinking off in Claude Code; the
+# second variable lets that number count on models that otherwise decide for themselves.
+NO_THINKING = {"MAX_THINKING_TOKENS": "0", "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1"}
+NO_THINK_NODES = {"read_ad"}
+
 CLI_NODES = {"write_cv", "write_letter", "review_cv", "read_mail", "mail_jobs", "place_facts", "read_ad"}      # written by Claude Code when there is no API key
 
 
@@ -231,7 +239,7 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
                                       model=cc.cli_model(chosen_model(node)), effort=effort)
             prompt = (f"{user}\n\n{tail}" if sys_set else f"{system}\n\n{user}\n\n{tail}") + fix
             cmd = cc.prefix(exe) + ["-p", "--output-format", "json", "--max-turns", "1"] + extra
-            out = _run_claude(cmd, prompt, cwd, timeout=420)
+            out = _run_claude(cmd, prompt, cwd, timeout=420, **({"env": NO_THINKING} if node in NO_THINK_NODES else {}))
         try:
             env = json.loads(out.stdout.decode("utf-8", "replace"))
         except ValueError:
@@ -259,7 +267,8 @@ def _note_usage(node: str, env: dict) -> None:
     u = env.get("usage") or {}
     inp = (u.get("input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0)
     usage_log.append({"node": node, "input_tokens": inp, "output_tokens": u.get("output_tokens") or 0,
-                      "lean": settings.claude_lean})
+                      "lean": settings.claude_lean, "models": list((env.get("modelUsage") or {}).keys()),
+                      "seconds": round((env.get("duration_ms") or 0) / 1000, 1)})
     del usage_log[:-50]
 
 
