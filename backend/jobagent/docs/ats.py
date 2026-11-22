@@ -20,7 +20,7 @@ from typing import Optional, Union
 
 from ..schemas import CVContent, CVProfile, JobForWriting
 from ..steps.score import profile_text
-from ..vocab import ALL_TERMS, concept_key, find_concepts, find_terms_strict, term_regex, variants
+from ..vocab import ALL_TERMS, alternatives, concept_key, find_concepts, find_terms_strict, term_regex, variants
 
 TITLE_STOP = {
     "werkstudent", "werkstudentin", "werkstudent:in", "working", "student", "studentin", "studentische", "hilfskraft",
@@ -99,7 +99,10 @@ def language_gaps(job: JobForWriting, c: Doc) -> list[str]:
 
 def hit(term: str, text: str) -> bool:
     """Exact word match, singular or plural (most ATS stem 'AI Agents' / 'AI agent'), in any of the term's
-    forms ('Error Handling' = 'Fehlerbehandlung' = 'retries' ...)."""
+    forms ('Error Handling' = 'Fehlerbehandlung' = 'retries' ...). 'Gurobi or CPLEX or OR-Tools': any one."""
+    alts = alternatives(term)
+    if len(alts) > 1:
+        return any(hit(a, text) for a in alts)
     forms = variants(term)
     if len(forms) > 1:
         return any(_hit1(f, text) for f in forms)
@@ -201,7 +204,7 @@ def score(job: JobForWriting, c: Doc, prof: CVProfile, text: Optional[str] = Non
     asked = [k for k, names in LANGS.items() if any(re.search(rf"\b{n}\b", job.description or "", re.I) for n in names)]
     listed = " ".join(f"{l.language}" for l in c.languages).lower()
     from ..steps import knockouts as K
-    reqs = K.check(job.description, c, K.details_or_none())
+    reqs = K.check(job.description, c, K.details_or_none(), job.must_have)
     gaps = [r["text"] for r in reqs if not r["ok"]]
     short = {r["label"].lower() for r in reqs if r["key"].startswith("language:") and not r["ok"]}
     lang_hit = [k for k in asked if any(n in listed for n in LANGS[k]) and k not in short]

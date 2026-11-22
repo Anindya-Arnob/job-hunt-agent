@@ -48,6 +48,7 @@ export default function Settings() {
         <Row label="Guest browser hidden"><input type="checkbox" checked={!!f.headless_guest} onChange={set('headless_guest')} /></Row>
         <Row label="Job folder"><code className="text-xs">{f.job_dir}</code></Row>
       </div>
+      <LearnedWords />
       <DeletedJobs />
       <div className="card px-4">
         <Row label="Earlier Excel files" help="Jobs_*.xlsx, Job_Match_Summary_*.xlsx and _Report_*.xlsx from your job folder. Jobs in them are treated as already seen, so they are never rebuilt.">
@@ -74,6 +75,33 @@ function DeletedJobs() {
                 <button className="btn-ghost text-xs" onClick={async () => { await api.del(`/api/jobs/deleted/${d.id}`); reload() }}>Undo</button>
               </div>))}
             {!data.length && <div className="muted">None.</div>}
+          </div>)}
+      </Row>
+    </div>
+  )
+}
+
+function LearnedWords() {
+  const { data, reload } = useAsync(() => api.get('/api/learned-words'))
+  const [open, setOpen] = useState(false)
+  const toast = useToast()
+  if (!data) return null
+  return (
+    <div className="card px-4" data-testid="learned-words">
+      <Row label="Learned words" help="Skills and tools Claude found in ads you built a CV for. The free word matcher uses them to score new jobs, without tokens. Remove a wrong one.">
+        <button className="btn-outline" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show'} ({data.length})</button>
+        {open && (
+          <div className="mt-2 max-h-72 overflow-y-auto text-sm">
+            {data.map((w) => (
+              <div key={w.word} className="flex items-center gap-2 border-b border-slate-100 py-1">
+                <span className="font-medium">{w.word}</span>
+                {w.also.length > 0 && <span className="text-xs muted">also {w.also.join(', ')}</span>}
+                <span className="ml-auto truncate text-xs muted" title={w.from}>{w.from}</span>
+                <button className="btn-ghost text-xs" onClick={async () => {
+                  try { await api.post('/api/learned-words/forget', { word: w.word }); reload() } catch (e) { toast(e.message, 'error') }
+                }}>Remove</button>
+              </div>))}
+            {!data.length && <div className="muted">None yet. Claude adds words when it reads an ad at Build CV.</div>}
           </div>)}
       </Row>
     </div>

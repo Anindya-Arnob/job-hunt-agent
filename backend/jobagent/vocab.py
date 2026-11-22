@@ -115,9 +115,19 @@ def concept_of(term: str) -> str:
 _SKILL_SET = {x.lower() for x in SKILLS}
 
 
+def alternatives(term: str) -> list[str]:
+    """'Gurobi or CPLEX or OR-Tools' (the ad wants one of them) -> each name; any other term -> itself."""
+    if " or " not in (term or ""):
+        return [term]
+    return [p.strip() for p in term.split(" or ") if p.strip()]
+
+
 def variants(term: str) -> list[str]:
     """Every way of writing this keyword (the term itself first). A tool asked for by name (LangGraph, FastAPI,
     pytest) stays itself: only the concept's own name stands for all of its forms."""
+    lg = _LEARNED_OF.get((term or "").lower())
+    if lg:                                       # a learned word: 'OR-Tools' = 'Google OR-Tools'
+        return list(dict.fromkeys([term, lg, *LEARNED[lg]]))
     c = concept_of(term)
     if not c or (term.lower() != c.lower() and term.lower() in _SKILL_SET):
         return [term]
@@ -138,6 +148,9 @@ def is_practice(term: str) -> bool:
 
 def concept_key(term: str) -> str:
     """One key per keyword: the concept for its forms, the tool itself for tools."""
+    lg = _LEARNED_OF.get((term or "").lower())
+    if lg:
+        return lg.lower()
     c = concept_of(term)
     if not c or (term.lower() != c.lower() and term.lower() in _SKILL_SET):
         return term.lower()
@@ -207,3 +220,35 @@ def find_terms_strict(text: str, terms=None) -> list[str]:
                 continue
         out.append(t)
     return out
+
+
+# ------------------------------------------------------------- learned words ---
+# Skill and tool names Claude found in ads you built a CV for, with their other spellings. The free word matcher
+# uses them from then on, so the next ad that asks for them is scored right without spending tokens.
+# Kept in the app's data (Settings -> Learned words), loaded at start; built-in words are never touched.
+LEARNED: dict[str, list[str]] = {}
+_LEARNED_OF: dict[str, str] = {}
+
+
+def known(term: str) -> bool:
+    t = (term or "").lower()
+    return t in _SKILL_SET or t in {x.lower() for x in ALL_TERMS} or bool(concept_of(term)) or t in _LEARNED_OF
+
+
+def set_learned(words: dict[str, list[str]]) -> None:
+    """Replace the learned words (in place, so every module that imported the lists sees them)."""
+    old = {w for k, alts in LEARNED.items() for w in [k, *alts]}
+    SKILLS[:] = [x for x in SKILLS if x not in old]
+    ALL_TERMS[:] = [x for x in ALL_TERMS if x not in old]
+    LEARNED.clear()
+    _LEARNED_OF.clear()
+    for k, alts in words.items():
+        if not k or k.lower() in _SKILL_SET:
+            continue
+        alts = [a for a in alts if a and a.lower() != k.lower()]
+        LEARNED[k] = alts
+        SKILLS.append(k)
+        ALL_TERMS.append(k)
+        ALL_TERMS.extend(a for a in alts if len(a) > 2 and a not in ALL_TERMS)   # 'LP' alone: too many false hits
+        for f in [k, *alts]:
+            _LEARNED_OF.setdefault(f.lower(), k)

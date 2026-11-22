@@ -133,6 +133,20 @@ def clean_title(title: str) -> str:
 
 
 def job_for_writing(job: m.Job, sc: Optional[m.Score]) -> JobForWriting:
+    from ..steps import adread
+    ad = adread.cached(job.id) if job.id else None
+    jw = _job_for_writing(job, sc)
+    if ad is not None:                  # Claude read this ad: its lists, not the word matcher's
+        req = adread.required_terms(ad)
+        jw.required_skills = req
+        jw.keywords = list(dict.fromkeys(req + ad.nice_to_have))
+        jw.must_have = adread.must_groups(ad)
+        jw.nice_to_have = ad.nice_to_have
+        jw.ways_of_working = ad.ways_of_working
+    return jw
+
+
+def _job_for_writing(job: m.Job, sc: Optional[m.Score]) -> JobForWriting:
     return JobForWriting(
         company=job.company, title=clean_title(job.title), job_type=job.job_type, location=job.location,
         description=job.full_description, keywords=job.keywords, required_skills=job.required_skills,
@@ -188,7 +202,7 @@ def candidates(min_score: Optional[int] = None) -> list[dict]:
     details = K.details_or_none()
     out = []
     for j, sc in sorted(rows, key=lambda t: -t[1].total):
-        kos = K.knockouts(j.full_description or "", got[0], details) if got else []
+        kos = K.for_job(j, got[0], details) if got else []
         out.append({"job_id": j.id, "company": j.company, "title": j.title, "score": sc.total,
                     "verdict": "Skip" if kos else sc.verdict, "knockouts": kos})
     return out
@@ -255,16 +269,20 @@ def next_job(state: BuildState) -> dict:
         if sc and sc.total < settings.build_min_score and not state.get("rebuild"):
             results.append({"job_id": jid, "status": "skipped", "reason": f"Score {sc.total} below {settings.build_min_score}"})
             continue
-        if jid not in (state.get("force") or []):
-            from ..steps import knockouts as K
-            kos = K.knockouts(job.full_description, _profile(state)[0], K.details_or_none())
-            if kos:
-                why = "; ".join(kos)
-                results.append({"job_id": jid, "status": "stopped", "reason": f"Knock-out: {why}"})
-                events.emit({"type": "build", "message": f"{job.company} – {job.title}: not built. Knock-out: {why}. "
-                             "Use 'Build anyway' on the job if you still want this CV.", "job_id": jid},
-                            run_id=state["run_id"])
-                continue
+        from ..steps import adread
+        from ..steps import knockouts as K
+        forced = jid in (state.get("force") or [])
+
+        def stop(kos):
+            why = "; ".join(kos)
+            results.append({"job_id": jid, "status": "stopped", "reason": f"Knock-out: {why}"})
+            events.emit({"type": "build", "message": f"{job.company} – {job.title}: not built. Knock-out: {why}. "
+                         "Use 'Build anyway' on the job if you still want this CV.", "job_id": jid},
+                        run_id=state["run_id"])
+        kos = [] if forced else K.for_job(job, _profile(state)[0], K.details_or_none())   # free checks first
+        if kos:
+            stop(kos)
+            continue
         have = built_files(jid)
         if have and not state.get("rebuild"):
             results.append({"job_id": jid, "status": "already built", "folder": str(Path(have[0]).parent),
@@ -272,6 +290,17 @@ def next_job(state: BuildState) -> dict:
             events.emit({"type": "build", "message": f"{job.company or 'This job'} – {job.title}: already built "
                          f"({Path(have[0]).name}). Use Rebuild to make a new version.", "job_id": jid}, run_id=state["run_id"])
             continue
+        if adread.cached(jid) is None:
+            if adread.can_read():
+                events.emit({"type": "build", "message": f"{job.company} – {job.title}: Claude is reading the ad "
+                             "(once per job, small model)", "job_id": jid}, run_id=state["run_id"])
+            _, by_claude = adread.read(job)
+            if by_claude:
+                job, sc = _load(jid)                # the job's lists and free score now come from Claude's reading
+                kos = [] if forced else K.for_job(job, _profile(state)[0], K.details_or_none())
+                if kos:                             # a tool the ad says you must have is not on your CV
+                    stop(kos)
+                    continue
         events.emit({"type": "build", "message": f"Building CV for {job.company} – {job.title}", "job_id": jid},
                     run_id=state["run_id"])
         return {"queue": queue, "current": jid, "cv": None, "letter": None, "issues": [], "attempts": 0,

@@ -85,5 +85,34 @@ with _db.session_scope() as _s:
     _fp.name, _fp.roles = "AI and data jobs in Berlin", list(_db.ALL_ROLES)
     _fp.locations, _fp.job_types, _fp.days = ["Berlin", "Germany", "Remote"], list(_db.STUDENT_JOB_TYPES), 5
     _s.add(_fp)
+# Claude "reads" each ad at Build CV: the word list's terms, plus a new tool to learn; after /test/must the ad
+# also says one of Gurobi or OR-Tools is required (for the "I have this" knock-out)
+from jobagent import llm as _llm, vocab as _vocab  # noqa: E402
+from jobagent.api.main import app as _app  # noqa: E402
+from jobagent.steps import adread as _ad  # noqa: E402
+_MUST = {"on": False}
+_real = _llm.structured
+_ad.can_read = lambda: True
+
+
+def _structured(node, schema, system, user, **kw):
+    if node != "read_ad":
+        return _real(node, schema, system, user, **kw)
+    req = [_ad.Group(any_of=[t]) for t in _vocab.find_terms(user)[:12]]
+    if _MUST["on"]:
+        req.append(_ad.Group(any_of=["Gurobi", "OR-Tools"], must=True))
+    return _ad.AdRead(required=req, nice_to_have=["cuOpt"], ways_of_working=["Documentation"],
+                      spellings=[_ad.Spelling(term="OR-Tools", also=["Google OR-Tools"])])
+
+
+_llm.structured = _structured
+
+
+@_app.post("/test/must")
+def _must(on: bool = True):
+    _MUST["on"] = on
+    return _MUST
+
+
 print("UI tmp:", tmp, flush=True)
 uvicorn.run("jobagent.api.main:app", host="127.0.0.1", port=int(sys.argv[1] if len(sys.argv) > 1 else 8780), log_level="warning")

@@ -10,7 +10,7 @@ from sqlmodel import select
 from .. import db, llm, models as m
 from ..config import settings
 from ..schemas import CVProfile, DealBreaker, ScoreResult
-from ..vocab import ALL_TERMS, SYNONYMS, find_terms, norm_tool, term_regex
+from ..vocab import ALL_TERMS, SYNONYMS, alternatives, find_terms, norm_tool, term_regex
 from .classify import LEVELS
 from .clean import location_matches
 
@@ -73,7 +73,7 @@ def heuristic_score(job: m.Job, p: CVProfile, fp: Optional[m.FilterProfile] = No
     wanted = list(dict.fromkeys((job.required_skills or []) + (job.keywords or []) + find_terms(jtext, ALL_TERMS)))[:30]
     have, missing, wording = [], [], []
     for term in wanted:
-        if term_regex(term).search(ptext):
+        if any(term_regex(a).search(ptext) for a in alternatives(term)):
             have.append(term)
             continue
         alt = None
@@ -93,9 +93,10 @@ def heuristic_score(job: m.Job, p: CVProfile, fp: Optional[m.FilterProfile] = No
     proj_hits = 0
     for pr in p.projects:
         ptxt = " ".join([pr.name] + pr.stack + pr.bullets)
-        if sum(1 for t in wanted if term_regex(t).search(ptxt)) >= 2:
+        if sum(1 for t in wanted if any(term_regex(a).search(ptxt) for a in alternatives(t))) >= 2:
             proj_hits += 1
-    exp_hit = any(sum(1 for t in wanted if term_regex(t).search(" ".join(e.stack + e.bullets))) >= 1 for e in p.experience)
+    exp_hit = any(any(term_regex(a).search(" ".join(e.stack + e.bullets)) for t in wanted for a in alternatives(t))
+                  for e in p.experience)
     experience = min(25, 6 + proj_hits * 4 + (5 if exp_hit else 0))
     title_l = job.title.lower()
     from .. import roles as R

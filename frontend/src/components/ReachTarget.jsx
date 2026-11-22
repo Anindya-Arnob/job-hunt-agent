@@ -30,7 +30,7 @@ export default function ReachTarget({ jobId, building, onStarted }) {
   const add = async () => {
     setBusy(true)
     try {
-      const r = await api.post(`/api/jobs/${jobId}/boost`, { items: ticked.map((i) => ({ term: i.term, where: picked[i.term].where, proof: i.proof })) })
+      const r = await api.post(`/api/jobs/${jobId}/boost`, { items: ticked.map((i) => ({ term: picked[i.term].pick || i.term, where: picked[i.term].where, proof: i.proof })) })
       toast(`Added to your main CV: ${r.added.map((a) => a.term).join(', ')}. Building the CV again…`)
       onStarted && onStarted()
     } catch (e) { toast(e.message, 'error') }
@@ -51,9 +51,13 @@ export default function ReachTarget({ jobId, building, onStarted }) {
             {i.proof ? <span className="ml-auto flex items-center gap-1 text-xs text-emerald-700" title={i.proof.text}><CheckCircle2 size={12} />found in {i.proof.where}</span>
               : <span className="ml-auto text-xs muted">no proof found: tick only if you did it</span>}
           </label>
+          {picked[i.term] && i.term.includes(' or ') && (
+            <select className="input mt-1.5 w-auto py-1 text-xs" aria-label={`Which one ${i.term}`} value={picked[i.term].pick || i.term.split(' or ')[0]}
+              onChange={(e) => setPicked((p) => ({ ...p, [i.term]: { ...p[i.term], pick: e.target.value } }))}>
+              {i.term.split(' or ').map((n) => <option key={n}>{n}</option>)}</select>)}
           {picked[i.term] && (
             <input className="input mt-1.5 py-1 text-xs" placeholder={i.proof ? `Optional – Claude writes it from: “${i.proof.text.slice(0, 70)}…”` : 'Where? (optional, e.g. "Job Hunt Agent: retries and timeouts")'}
-              value={picked[i.term].where} onChange={(e) => setPicked((p) => ({ ...p, [i.term]: { where: e.target.value } }))} aria-label={`Where ${i.term}`} />)}
+              value={picked[i.term].where} onChange={(e) => setPicked((p) => ({ ...p, [i.term]: { ...p[i.term], where: e.target.value } }))} aria-label={`Where ${i.term}`} />)}
         </div>))}
       {!plan.reachable && plan.items.length > 0 && <p className="text-xs text-amber-700">Even with every word the target is out of reach for this ad; the language or experience gaps above weigh more.</p>}
       {plan.items.length > 0 && (

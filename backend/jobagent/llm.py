@@ -39,10 +39,13 @@ NODE_TIER = {
     "write_letter": "smart",
     "review_cv": "smart",
     "place_facts": "fast",
+    "read_ad": "fast",
 }
 
 # Nodes that follow the model you picked for CV building (Settings → CV building)
 def chosen_model(node: str) -> str:
+    if node == "read_ad":            # listing an ad's skills: the small model is enough
+        return "haiku"
     if node in ("write_cv", "check_cv", "review_cv", "place_facts"):
         return settings.cv_model
     if node == "write_letter":
@@ -199,7 +202,7 @@ def _chat(model: str, max_tokens: int):
 QUICK_RULE = ("SPEED RULE: write the JSON answer straight away. Do not plan, draft or check it in your head first; "
               "one pass is enough.\n\n")
 
-CLI_NODES = {"write_cv", "write_letter", "review_cv", "read_mail", "mail_jobs", "place_facts"}      # written by Claude Code when there is no API key
+CLI_NODES = {"write_cv", "write_letter", "review_cv", "read_mail", "mail_jobs", "place_facts", "read_ad"}      # written by Claude Code when there is no API key
 
 
 def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
@@ -217,6 +220,8 @@ def _cli_structured(node: str, schema: Type[T], system: str, user: str) -> T:
     # without a level Claude decides itself and thought for 12,000-17,000 tokens per CV (minutes each);
     # a rule-bound rewrite does not need that: low unless you chose more in Build options
     effort = (settings.cv_effort or "low") if node in ("write_cv", "write_letter", "review_cv", "place_facts") else ""
+    if node == "read_ad":            # a short list: no thinking needed, whatever the CV effort is
+        effort = "low"
     if effort == "low":           # measured: thinking 4-5k tokens -> 0, same answer length, 4x faster
         tail = QUICK_RULE + tail
     last, fix = None, ""

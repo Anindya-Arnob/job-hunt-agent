@@ -180,6 +180,11 @@ def add_to_main(picks: list[dict], company: str = "") -> dict:
     if not got:
         raise BoostError("Upload your main CV first.")
     prof, vid = got
+    from ..vocab import alternatives
+    for pk in picks:              # 'Gurobi or CPLEX or OR-Tools': the one you used (named in "where"), else the first
+        alts = alternatives(pk.get("term", ""))
+        if len(alts) > 1:
+            pk["term"] = next((a for a in alts if a.lower() in (pk.get("where") or "").lower()), alts[0])
     plan_ = placements(prof, picks)
     p = prof.model_copy(deep=True)
     added = []

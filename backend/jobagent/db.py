@@ -69,6 +69,11 @@ def init_db() -> None:
     _add_missing_columns()
     seed()
     load_setting_overrides()
+    try:
+        from .steps.adread import load_learned
+        load_learned()                  # words Claude taught the free matcher
+    except Exception:
+        pass
 
 
 def _add_missing_columns() -> None:

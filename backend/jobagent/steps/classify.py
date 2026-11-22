@@ -95,7 +95,7 @@ def heuristic_classification(title: str, description: str, hint: str = "", locat
         langs.append("English")
     if german:
         langs.append(f"German {german} (required)")
-    elif "german" in low or "deutsch" in low:
+    elif re.search(r"\bgerman\b|\bdeutsch(?!land)", low):     # not "#Deutschland" or "Germany"
         langs.append("German (nice to have)")
     sal = re.search(r"(\d{1,3}(?:[.,]\d{3})*\s?(?:€|eur|euro)(?:\s?/\s?(?:h|hour|stunde|month|monat|year|jahr))?|€\s?\d+[.,]?\d*\s?(?:/\s?h)?)", text, re.I)
     seniority = "senior" if SENIOR_TITLE.search(title) else ("student" if jt == "Working Student" else ("intern" if jt == "Internship" else "unknown"))

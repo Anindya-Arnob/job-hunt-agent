@@ -6,6 +6,7 @@ import {
   RefreshCw, RotateCcw, Rows2, Rows3, Search, SlidersHorizontal, Trash2, X,
 } from 'lucide-react'
 import { api, fmtDate, fmtDateTime, SOURCE_LABEL, stoppedText } from '../api'
+import HaveThis from '../components/HaveThis'
 import { Modal, StatusBadge, useToast, VerdictBadge } from '../ui'
 import { useOnEvent } from '../events'
 
@@ -675,6 +676,7 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
           <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-rose-900" data-testid="job-knockouts">
             <div className="font-semibold">Knock-out – the app won't build this CV</div>
             <ul className="mt-1 list-disc pl-5 text-xs">{j.knockouts.map((k) => <li key={k}>{k}</li>)}</ul>
+            <HaveThis jobId={id} groups={j.missing_tools} onStarted={() => nav('/build')} />
             <div className="mt-2 flex items-center gap-2 text-xs"><span className="muted">No wording fixes this, so building would spend tokens on a likely “no”.</span>
               <button className="btn-outline ml-auto shrink-0 border-rose-300 py-1 text-xs text-rose-700" onClick={() => build(true, true)}>Build anyway</button></div>
           </div>)}
@@ -710,7 +712,10 @@ export function JobDetail({ id, onClose, onChanged, onDelete }) {
           <div><span className="label">Missing skills (not on your CV)</span>
             <div className="flex flex-wrap gap-1">{j.missing_skills.map((w) => <span key={w} className="chip bg-rose-50 text-rose-700">{w}</span>)}</div></div>
         )}
-        {j.keywords?.length > 0 && <div><span className="label">Keywords</span><div className="text-xs">{j.keywords.join(' · ')}</div></div>}
+        {j.keywords?.length > 0 && <div><span className="label">Keywords</span>
+          {j.read_by_claude ? <span className="chip ml-2 bg-teal-50 text-teal-700" title="Claude read this ad when you built the CV; the list and the score use its reading">Read by Claude</span>
+            : <span className="ml-2 text-xs muted" title="Claude reads the ad when you click Build CV">word list</span>}
+          <div className="text-xs">{j.keywords.join(' · ')}</div></div>}
         {j.language_req && <div><span className="label">Languages</span>{j.language_req}</div>}
         {j.salary && <div><span className="label">Salary</span>{j.salary}</div>}
         <div><span className="label">Full description</span>

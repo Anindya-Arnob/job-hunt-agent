@@ -230,6 +230,32 @@ with sync_playwright() as p:
     expect(page.get_by_role("button", name="Build anyway")).to_be_visible()
     shot(page, "10b_knockout")
 
+    # Claude reads the ad at Build CV: a tool the ad says you must have stops the build; "I have this" adds it
+    page.evaluate("fetch('/test/must?on=true', {method: 'POST'})")
+    pick = page.evaluate("""async () => { const s = await (await fetch('/api/settings')).json();
+        const js = await (await fetch('/api/jobs')).json();
+        return js.find(j => !(j.knockouts || []).length && j.score >= s.build_min_score && j.status === 'scored') }""")
+    assert pick, "no job left to build"
+    page.goto(BASE + f"/jobs/{pick['id']}")
+    page.get_by_role("button", name="Build CV").click()
+    page.wait_for_timeout(1000)
+    page.wait_for_function("async () => (await (await fetch('/api/build/active')).json()).length === 0", timeout=180000, polling=1000)
+    page.goto(BASE + f"/jobs/{pick['id']}")
+    expect(page.get_by_test_id("job-knockouts")).to_contain_text("one of Gurobi, OR-Tools")
+    expect(page.get_by_text("Read by Claude")).to_be_visible()
+    page.get_by_role("button", name="I have this").click()
+    page.get_by_label("Which one").select_option("OR-Tools")
+    page.get_by_label("Where you used it").fill("Master thesis: vehicle routing")
+    shot(page, "10b2_have_this")
+    page.get_by_role("button", name="Add to my CV and build").click()
+    expect(page.get_by_text("Added OR-Tools to your main CV")).to_be_visible(timeout=60000)
+    page.wait_for_timeout(1000)
+    page.wait_for_function("async () => (await (await fetch('/api/build/active')).json()).length === 0", timeout=180000, polling=1000)
+    page.evaluate("fetch('/test/must?on=false', {method: 'POST'})")
+    left = page.evaluate(f"async () => (await (await fetch('/api/jobs/{pick['id']}')).json()).missing_tools")
+    assert left == [], left
+    page.evaluate(f"fetch('/api/jobs/{pick['id']}', {{method: 'DELETE'}})")    # the later steps expect one built job
+
     # 7b My details (prefilled from the CV) + Apply queue
     page.locator("aside").get_by_role("link", name=re.compile(r"^My\ details(\s|$)")).click()
     expect(page.get_by_role("heading", name="My details")).to_be_visible()
@@ -324,6 +350,12 @@ with sync_playwright() as p:
     inp.fill("68")
     page.get_by_role("button", name="Save").first.click()
     expect(page.get_by_text("Settings saved")).to_be_visible()
+    lw = page.get_by_test_id("learned-words")
+    lw.get_by_role("button", name=re.compile(r"^Show")).click()
+    expect(lw.get_by_text("Gurobi", exact=True)).to_be_visible()
+    expect(lw.get_by_text("also Google OR-Tools")).to_be_visible()
+    lw.locator("div.flex", has=page.get_by_text("cuOpt", exact=True)).get_by_role("button", name="Remove").click()
+    expect(lw.get_by_text("cuOpt", exact=True)).to_have_count(0)
     shot(page, "14_settings")
 
     # 11a delete the tailored CV + letter on Documents
@@ -352,7 +384,7 @@ with sync_playwright() as p:
     expect(page.get_by_text("Deleted 1 job")).to_be_visible()
     shot(page, "11b_after_delete")
     page.locator("aside").get_by_role("link", name=re.compile(r"^Settings(\s|$)")).click()
-    page.get_by_role("button", name="Show (3)").click()
+    page.get_by_role("button", name="Show (4)").click()                  # 3 deleted here + the one built for "I have this"
     expect(page.get_by_role("button", name="Undo").first).to_be_visible()
 
     # 12 dashboard filled

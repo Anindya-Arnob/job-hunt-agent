@@ -30,7 +30,8 @@ def job_terms(job: JobForWriting) -> list[str]:
 
 
 def _relevance(text: str, terms: list[str]) -> int:
-    return sum(1 for t in terms if term_regex(t).search(text))
+    from ..vocab import alternatives
+    return sum(1 for t in terms if any(term_regex(a).search(text) for a in alternatives(t)))
 
 
 def _first_sentence_limit(s: str, words: int) -> str:
@@ -154,9 +155,21 @@ def heuristic_cv(job: JobForWriting, prof: CVProfile, level: int = 0, picked: in
 def _job_block(job: JobForWriting) -> str:
     return (f"JOB:\nCompany: {job.company}\nTitle: {job.title}\nType: {job.job_type}\nLocation: {job.location}\n"
             f"Keywords: {', '.join(job.keywords)}\nRequired skills: {', '.join(job.required_skills)}\n"
+            + (f"Must have (the ad says required; 'or' = one of them): {'; '.join(' or '.join(g) for g in job.must_have)}\n"
+               if job.must_have else "")
+            + (f"Nice to have: {', '.join(job.nice_to_have)}\n" if job.nice_to_have else "")
+            + (f"Ways of working (show them in bullets, never in the skills list): {', '.join(job.ways_of_working)}\n"
+               if job.ways_of_working else "") +
             f"Missing wording (resume term -> posting term): {'; '.join(job.missing_wording)}\n"
             f"Missing skills (do NOT claim): {', '.join(job.missing_skills)}\n"
-            f"Deal-breakers: {'; '.join(job.deal_breakers)}\n\nDESCRIPTION:\n{job.description[:15000]}")
+            f"Deal-breakers: {'; '.join(job.deal_breakers)}\n\nDESCRIPTION:\n{_ad_text(job.description)}")
+
+
+def _ad_text(text: str) -> str:
+    """The ad without the company text (About us, equal opportunity, benefits): fewer tokens, same job."""
+    from .adread import trim
+    t = trim(text)
+    return t if len(t) > 200 else (text or "")[:15000]
 
 
 def system_prompt(name: str) -> str:

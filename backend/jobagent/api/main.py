@@ -87,12 +87,13 @@ def _knockouts_cached(j: m.Job, ctx) -> list[str]:
     if not ctx:
         return []
     prof, details, key = ctx
-    k = (j.id, key)
+    from ..steps import adread
+    k = (j.id, key, adread.VERSION[0])
     if k not in _KO_CACHE:
         from ..steps import knockouts as K
         if len(_KO_CACHE) > 20000:
             _KO_CACHE.clear()
-        _KO_CACHE[k] = K.knockouts(j.full_description or "", prof, details)
+        _KO_CACHE[k] = K.for_job(j, prof, details)
     return _KO_CACHE[k]
 
 
@@ -120,6 +121,11 @@ def job_dict(j: m.Job, sc: Optional[m.Score] = None, full: bool = False, ko=None
     }
     kos = _knockouts_cached(j, ko) if ko else []
     d["knockouts"] = kos
+    if full:
+        from ..steps import adread
+        from ..steps import knockouts as K
+        d["read_by_claude"] = adread.cached(j.id) is not None
+        d["missing_tools"] = K.missing_tools(j, ko[0]) if ko else []
     if kos:
         d["verdict"] = "Skip"                       # a knock-out: unlikely, whatever the fit score
     if full:
@@ -1122,7 +1128,7 @@ def knockouts_for(job_ids: list[int]) -> dict[int, list[str]]:
     with db.session_scope() as s:
         for jid in job_ids:
             j = s.get(m.Job, jid)
-            kos = K.knockouts(j.full_description or "", prof, details) if j else []
+            kos = K.for_job(j, prof, details) if j else []
             if kos:
                 out[jid] = kos
     return out
@@ -1162,6 +1168,7 @@ class BoostItem(BaseModel):
 
 class BoostIn(BaseModel):
     items: list[BoostItem]
+    force: bool = True          # False from "I have this" on a knock-out: the other knock-outs still apply
 
 
 @app.post("/api/jobs/{job_id}/boost")
@@ -1177,8 +1184,34 @@ async def boost_apply(job_id: int, body: BoostIn):
         out = await asyncio.to_thread(boost.add_to_main, [i.model_dump() for i in body.items], company)
     except boost.BoostError as e:
         _err(e)
-    run_id, already = await runs.start_build([job_id], None, True, force=[job_id])   # you chose to improve this CV
-    return {**out, "run_id": run_id, "already_building": already}
+    if not body.force:
+        stopped = knockouts_for([job_id])
+        if stopped:
+            return {**out, "run_id": None, "already_building": [],
+                    "stopped": [{"job_id": job_id, "job": company, "reasons": stopped[job_id]}]}
+    run_id, already = await runs.start_build([job_id], None, True, force=[job_id] if body.force else None)
+    return {**out, "run_id": run_id, "already_building": already, "stopped": []}
+
+
+# ------------------------------------------------- words Claude taught the matcher ---
+@app.get("/api/learned-words")
+def learned_words():
+    from ..steps import adread
+    w = adread.learned()
+    return [{"word": k, "also": v.get("also", []), "from": v.get("from", ""), "added": v.get("added", "")}
+            for k, v in sorted(w.items(), key=lambda kv: kv[1].get("added", ""), reverse=True)]
+
+
+class ForgetIn(BaseModel):
+    word: str
+
+
+@app.post("/api/learned-words/forget")
+async def forget_word(body: ForgetIn):
+    from ..steps import adread
+    if not await asyncio.to_thread(adread.forget, body.word):
+        raise HTTPException(404, "Not a learned word")
+    return {"ok": True}
 
 
 @app.get("/api/build/active")

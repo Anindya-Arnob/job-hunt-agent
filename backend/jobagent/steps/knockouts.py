@@ -181,11 +181,23 @@ def _asks(rx: re.Pattern, text: str) -> bool:
 
 
 # ----------------------------------------------------------------------- all ---
-def check(description: str, prof, details=None) -> list[dict]:
+def check(description: str, prof, details=None, must=None) -> list[dict]:
     """Every requirement the ad states that this check knows, met or not:
-    {"key", "label", "need", "have", "ok", "text"}. Not met = a knock-out."""
-    from ..docs.ats import CEFR, LANGS, level_of, required_levels
+    {"key", "label", "need", "have", "ok", "text"}. Not met = a knock-out.
+    `must`: the tools the ad itself marks as required, as Claude read them ([["Gurobi", "CPLEX", "OR-Tools"]]:
+    one of them is enough)."""
+    from ..docs.ats import CEFR, LANGS, hit, level_of, required_levels
     out = []
+    if must:
+        from .score import profile_text
+        mine = profile_text(prof)
+        for names in must:
+            ok = any(hit(n, mine) for n in names)
+            need = names[0] if len(names) == 1 else "one of " + ", ".join(names)
+            out.append({"key": "tool:" + " or ".join(names), "label": "Required", "need": need, "names": names,
+                        "have": "in your CV" if ok else "not in your CV", "ok": ok,
+                        "text": f"Required: the ad asks for {need}, your CV " +
+                                ("shows it" if ok else "does not show " + ("it" if len(names) == 1 else "any of them"))})
     for k, need in required_levels(description).items():
         mine = [l for l in prof.languages if any(n in l.language.lower() for n in LANGS[k])]
         have = level_of(mine[0].level) if mine else None
@@ -232,8 +244,23 @@ def check(description: str, prof, details=None) -> list[dict]:
     return out
 
 
-def knockouts(description: str, prof, details=None) -> list[str]:
-    return [r["text"] for r in check(description, prof, details) if not r["ok"]]
+def knockouts(description: str, prof, details=None, must=None) -> list[str]:
+    return [r["text"] for r in check(description, prof, details, must) if not r["ok"]]
+
+
+def must_for(job_id) -> list[list[str]]:
+    """The must-have tools Claude read in this job's ad (none until the ad has been read)."""
+    from . import adread
+    return adread.must_groups(adread.cached(job_id)) if job_id else []
+
+
+def for_job(job, prof, details=None) -> list[str]:
+    return knockouts(job.full_description or "", prof, details, must_for(job.id))
+
+
+def missing_tools(job, prof) -> list[list[str]]:
+    """The must-have tool groups your CV does not show (for "I have this")."""
+    return [r["names"] for r in check("", prof, None, must_for(job.id)) if not r["ok"]]
 
 
 def details_or_none():

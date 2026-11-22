@@ -221,3 +221,6 @@ class JobForWriting(BaseModel):
     missing_skills: list[str] = Field(default_factory=list)
     deal_breakers: list[str] = Field(default_factory=list)
     lang: Literal["en", "de"] = "en"           # which language the CV and the letter are written in
+    must_have: list[list[str]] = Field(default_factory=list)   # tools the ad marks as required (one of each group)
+    nice_to_have: list[str] = Field(default_factory=list)
+    ways_of_working: list[str] = Field(default_factory=list)
