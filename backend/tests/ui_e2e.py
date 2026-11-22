@@ -288,6 +288,14 @@ with sync_playwright() as p:
     chk = next(r for r in runs_ if r["kind"] == "claude_check")
     assert chk["status"] == "done" and chk["counts"]["checked"] >= 1, chk
     expect(page.get_by_test_id("check-progress")).to_have_count(0)
+    page.get_by_role("button", name=re.compile(r"^Filters")).click()           # "which jobs did Claude check?"
+    page.get_by_role("button", name="Checked", exact=True).click()
+    expect(page.get_by_text("Checked by Claude").first).to_be_visible()
+    page.get_by_role("button", name=re.compile(r"^Filters")).click()
+    expect(page.get_by_test_id("claude-cell").first).to_be_visible()
+    shot(page, "10b4_claude_column")
+    page.get_by_role("button", name="Clear all").click()
+    expect(page.get_by_text("Checked by Claude")).to_have_count(0)
     page.evaluate(f"fetch('/api/jobs/{pick['id']}', {{method: 'DELETE'}})")    # the later steps expect one built job
 
     # 7b My details (prefilled from the CV) + Apply queue

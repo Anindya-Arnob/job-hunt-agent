@@ -566,8 +566,9 @@ def list_jobs(tab: str = "all", verdict: Optional[str] = None, min_score: Option
             kinds.setdefault(jid_, set()).add(kind)
     out = []
     ko = _ko_context()
-    from ..steps import stops
+    from ..steps import adread, stops
     stopped = stops.all_stops()
+    claude = adread.checked_all()
     for j in jobs:
         sc = scores.get(j.id)
         d = job_dict(j, sc, ko=ko)
@@ -583,6 +584,8 @@ def list_jobs(tab: str = "all", verdict: Optional[str] = None, min_score: Option
             continue
         if hide_hard_blockers and ((sc and any(x.get("hard") for x in sc.deal_breakers)) or d["knockouts"]):
             continue
+        if j.id in claude:                           # Claude read this ad (Claude check or Build CV)
+            d["claude"] = claude[j.id] or {"before": None, "after": None}
         if j.id in stopped and j.status in STOPPABLE:
             d["stopped"] = stopped[j.id]
         d["has_cv"] = "cv" in kinds.get(j.id, ())

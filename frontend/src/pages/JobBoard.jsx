@@ -44,6 +44,7 @@ const STATUS_STYLE = {
 
 const COLUMNS = [            // what the column chooser offers
   { id: 'score', label: 'Score' },
+  { id: 'claude', label: 'Checked by Claude (score before → after)' },
   { id: 'title', label: 'Job (title, company, place)' },
   { id: 'company', label: 'Company (own column)' },
   { id: 'verdict', label: 'Verdict' },
@@ -79,7 +80,7 @@ const dirLabel = ({ key, dir }) => ['title', 'company', 'job_type', 'location'].
 
 const EMPTY = {
   q: '', verdicts: [], types: [], modes: [], countries: [], roles: [], sources: [], statuses: [],
-  minScore: '', maxScore: '', found: '', posted: '', loc: '', german: '', cv: '', hideHard: false, hasDesc: false,
+  minScore: '', maxScore: '', found: '', posted: '', loc: '', german: '', cv: '', claude: '', hideHard: false, hasDesc: false,
 }
 const WITHIN = [{ id: '', label: 'Any', long: 'any time' }, { id: 'today', label: 'Today', long: 'today' }, { id: '3', label: '3 days', long: 'last 3 days' }, { id: '7', label: '7 days', long: 'last 7 days' }, { id: '30', label: '30 d', long: 'last 30 days' }]
 
@@ -153,6 +154,8 @@ function matches(j, f) {
   if (f.loc && !(j.location || '').toLowerCase().includes(f.loc.toLowerCase())) return false
   if (f.german === 'hide' && j._german) return false
   if (f.german === 'only' && !j._german) return false
+  if (f.claude === 'yes' && !j.claude) return false
+  if (f.claude === 'no' && j.claude) return false
   if (f.cv === 'yes' && !j.has_cv) return false
   if (f.cv === 'no' && j.has_cv) return false
   if (f.hideHard && j._hard) return false
@@ -309,6 +312,7 @@ export default function JobBoard() {
   if (filt.posted) active.push({ k: 'posted', label: `Posted: ${WITHIN.find((w) => w.id === filt.posted).long}`, clear: () => set({ posted: '' }) })
   if (filt.loc) active.push({ k: 'loc', label: `Location contains “${filt.loc}”`, clear: () => set({ loc: '' }) })
   if (filt.german) active.push({ k: 'german', label: filt.german === 'hide' ? 'No German required' : 'German required', clear: () => set({ german: '' }) })
+  if (filt.claude) active.push({ k: 'claude', label: filt.claude === 'yes' ? 'Checked by Claude' : 'Not checked by Claude', clear: () => set({ claude: '' }) })
   if (filt.cv) active.push({ k: 'cv', label: filt.cv === 'yes' ? 'CV built' : 'No CV yet', clear: () => set({ cv: '' }) })
   if (filt.hideHard) active.push({ k: 'hard', label: 'No hard deal-breakers', clear: () => set({ hideHard: false }) })
   if (filt.hasDesc) active.push({ k: 'desc', label: 'With description', clear: () => set({ hasDesc: false }) })
@@ -321,6 +325,17 @@ export default function JobBoard() {
       { colId: 'sel', headerName: '', checkboxSelection: true, headerCheckboxSelection: true, headerCheckboxSelectionFilteredOnly: true, width: 48, pinned: 'left', resizable: false, sortable: false, suppressMovable: true },
       { colId: 'score', field: 'score', headerName: 'Score', ...w('score', { width: 88 }), comparator: (a, b) => (a ?? -1) - (b ?? -1),
         cellRenderer: (p) => <ScorePill score={p.value} outdated={p.data.score_outdated} compact={compact} /> },
+      { colId: 'claude', field: 'claude', headerName: 'Claude', ...w('claude', { width: 104 }),
+        headerTooltip: 'Did Claude read this ad (Claude check or Build CV)? Shows the score before → after',
+        comparator: (a, b) => (a ? 1 : 0) - (b ? 1 : 0) || ((a?.after ?? 0) - (b?.after ?? 0)),
+        cellRenderer: (p) => {
+          const c = p.value
+          if (!c) return <span className="text-xs text-slate-300" title="Not checked by Claude yet – only the word list">–</span>
+          const moved = c.before !== null && c.after !== null && c.before !== c.after
+          return <span className="inline-flex items-center gap-1 text-xs" data-testid="claude-cell" title={`Checked by Claude${c.at ? ` ${fmtDateTime(c.at)}` : ''}${moved ? `: score ${c.before} → ${c.after}` : ''}`}>
+            <Sparkles size={12} className="shrink-0 text-teal-600" />
+            {moved ? <span className={c.after < c.before ? 'text-rose-600' : 'text-emerald-600'}>{c.before}→{c.after}</span> : <span className="text-teal-700">checked</span>}</span>
+        } },
       { colId: 'title', field: 'title', headerName: 'Job', ...w('title', { flex: 2, minWidth: 240 }),
         comparator: (a, b) => strip(a).localeCompare(strip(b), undefined, { sensitivity: 'base' }),
         cellRenderer: (p) => compact
@@ -381,6 +396,22 @@ export default function JobBoard() {
     ]
     return c.map((d) => ({ ...d, hide: hidden.includes(d.colId), sort: sort.key === d.colId ? sort.dir : null }))
   }, [tab, hidden, sort, compact, widths]) // eslint-disable-line
+
+  useEffect(() => {
+    let placed = false
+    try { placed = localStorage.getItem('jobs.claudeColPlaced') === '1' } catch { /* private mode */ }
+    if (placed) return
+    const t = setTimeout(() => {
+      try {
+        const g = grid.current?.api
+        const at = g.getAllGridColumns().findIndex((c) => c.getColId() === 'score')
+        if (at < 0) return
+        g.moveColumns(['claude'], at + 1)
+        localStorage.setItem('jobs.claudeColPlaced', '1')
+      } catch { /* grid not ready yet: next time */ }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [cols])
 
   useEffect(() => {        // the grid keeps its column order: put "why it stopped" next to the job, not at the far right
     if (tab !== 'stopped') return
@@ -582,6 +613,7 @@ export default function JobBoard() {
             <Segmented label="Posted within" options={WITHIN} value={filt.posted} onChange={(v) => set({ posted: v })} />
             <Segmented label="German" options={[{ id: '', label: 'Any' }, { id: 'hide', label: 'Not required' }, { id: 'only', label: 'Required' }]} value={filt.german} onChange={(v) => set({ german: v })} />
             <Segmented label="CV" options={[{ id: '', label: 'Any' }, { id: 'yes', label: 'Built' }, { id: 'no', label: 'Not built' }]} value={filt.cv} onChange={(v) => set({ cv: v })} />
+            <Segmented label="Claude" options={[{ id: '', label: 'Any' }, { id: 'yes', label: 'Checked' }, { id: 'no', label: 'Not checked' }]} value={filt.claude || ''} onChange={(v) => set({ claude: v })} />
             <div className="flex flex-col justify-end gap-2">
               <Toggle checked={filt.hideHard} onChange={(v) => set({ hideHard: v })}>Hide hard deal-breakers</Toggle>
               <Toggle checked={filt.hasDesc} onChange={(v) => set({ hasDesc: v })}>Only jobs with a full description</Toggle>

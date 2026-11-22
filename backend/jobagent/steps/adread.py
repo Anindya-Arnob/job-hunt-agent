@@ -304,3 +304,23 @@ def forget(word: str) -> bool:
     _store(words)
     _rescore()
     return True
+
+
+def checked_all() -> dict[int, dict]:
+    """Every job Claude read: id -> {"before", "after", "at"} (empty dict when only the reading is kept)."""
+    from sqlmodel import select
+    out: dict[int, dict] = {}
+    with db.session_scope() as s:
+        for row in s.exec(select(m.AppSetting).where(m.AppSetting.key.startswith("ad_read:"))).all():
+            try:
+                out[int(row.key[8:])] = {}
+            except ValueError:
+                pass
+        for row in s.exec(select(m.AppSetting).where(m.AppSetting.key.startswith("claude_check:"))).all():
+            try:
+                jid = int(row.key[13:])
+                if jid in out:
+                    out[jid] = json.loads(row.value)
+            except (ValueError, TypeError):
+                pass
+    return out

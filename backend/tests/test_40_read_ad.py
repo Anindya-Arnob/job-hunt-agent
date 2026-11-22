@@ -253,6 +253,9 @@ def test_claude_check_for_the_ticked_jobs_one_after_another(setup, claude_reads)
         run = c.get(f"/api/runs/{r['run_id']}").json()
         run = run.get("run", run)
         assert run["status"] == "done" and run["counts"]["checked"] == 2
+        rows = {x["id"]: x for x in c.get("/api/jobs?tab=all").json()}
+        assert rows[jid]["claude"]["before"] is not None and rows[other]["claude"]     # the board's Claude column
+        assert not [x for x in rows.values() if x["id"] not in (jid, other) and x.get("claude")]
         r = c.post("/api/claude-check", json={"job_ids": [jid, other]}).json()   # read already: no tokens
         assert r["run_id"] is None and r["skipped"] == 2 and len(claude_reads) == 2
         assert c.post("/api/claude-check", json={"job_ids": []}).status_code == 400
