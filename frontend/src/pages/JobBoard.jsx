@@ -258,6 +258,7 @@ export default function JobBoard() {
   const [tab, setTab] = useState(prefs0.tab || 'new')
   const [raw, setRaw] = useState(null)
   const [counts, setCounts] = useState({})
+  const [checkTick, setCheckTick] = useState(0)
   const [filt, setFilt] = useState(EMPTY)
   const [showFilters, setShowFilters] = useState(!!prefs0.showFilters)
   const [hidden, setHidden] = useState(prefs0.hidden || DEFAULT_HIDDEN)
@@ -276,7 +277,7 @@ export default function JobBoard() {
     setRaw(rows.map(enrich)); setCounts(c)
   }, [tab])
   useEffect(() => { setRaw(null); load() }, [load])
-  useOnEvent((ev) => { if (ev.type === 'run_done') load() }, [load])
+  useOnEvent((ev) => { if (ev.type === 'run_done' || (ev.type === 'claude_check' && ev.job_id)) load() }, [load])
   useEffect(() => { grid.current?.api?.redrawRows() }, [id])      // highlight the open row
 
   const all = raw || []
@@ -427,6 +428,14 @@ export default function JobBoard() {
         toast(already ? `${n - already} CV(s) started; ${already} already being built (not started twice)` : `Building ${n} CV(s) – run #${r.run_id}`)
         nav('/build')
       }
+    } catch (e) { toast(e.message, 'error') }
+  }
+  const checkSelected = async () => {
+    try {
+      const r = await api.post('/api/claude-check', { job_ids: selected.map((s) => s.id) })
+      if (!r.run_id) toast(`Claude already read ${r.skipped === 1 ? 'this ad' : `all ${r.skipped} ads`} – open a job and press “Check again” to read one again`, 'warn')
+      else { toast(`Claude check started: ${r.total} job(s), one after another${r.skipped ? ` (${r.skipped} already read, skipped)` : ''}`); setCheckTick((t) => t + 1) }
+      clearSel()
     } catch (e) { toast(e.message, 'error') }
   }
   const setStatusSelected = async (status) => {
@@ -589,6 +598,8 @@ export default function JobBoard() {
           <button className="text-xs font-medium text-slate-500 hover:text-rose-600" onClick={() => setFilt({ ...EMPTY, q: filt.q })}>Clear all</button>
         </div>)}
 
+      <CheckProgress tick={checkTick} onStep={load} />
+
       {/* selection bar */}
       <div className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm transition ${selected.length ? 'bg-ink text-white shadow-lg' : 'bg-transparent text-slate-500'}`}>
         {selected.length ? <>
@@ -601,6 +612,8 @@ export default function JobBoard() {
               {['scored', 'built', 'applied', 'interview', 'offer', 'rejected', 'excluded'].map((s) => <option key={s} value={s} className="text-slate-800">{STATUS_LABEL[s]}</option>)}
             </select>
             <button className="btn border border-white/20 bg-white/5 text-white hover:bg-rose-500/80" onClick={() => setToDelete(selected)}><Trash2 size={14} />Delete ({selected.length})</button>
+            <button className="btn border border-white/20 bg-white/5 text-white hover:bg-white/15" onClick={checkSelected} data-testid="check-selected"
+              title="Claude reads only the ads (small model, one after another) and updates the scores and knock-outs – nothing is built"><Sparkles size={14} />Claude check ({selected.length})</button>
             <button className="btn bg-teal text-white hover:bg-teal-600" onClick={buildSelected}><Hammer size={14} />Build CV{selected.length > 1 ? 's' : ''} ({selected.length})</button>
           </div>
         </> : <>
@@ -659,6 +672,29 @@ export function DeleteModal({ jobs, onClose, onDone }) {
       </div>
     </Modal>
   )
+}
+
+// The Claude check on the ticked jobs, while it runs: how far, which job now, and Stop.
+function CheckProgress({ tick, onStep }) {
+  const [st, setSt] = useState(null)
+  const toast = useToast()
+  const poll = useCallback(() => api.get('/api/claude-check/active').then(setSt).catch(() => {}), [])
+  useEffect(() => { poll() }, [poll, tick])
+  useEffect(() => { if (!st) return; const t = setInterval(poll, 2500); return () => clearInterval(t) }, [st, poll])
+  useOnEvent((ev) => { if (ev.type === 'claude_check' || (ev.type === 'run_done' && ev.kind === 'claude_check')) poll() }, [poll])
+  if (!st) return null
+  const stop = async () => {
+    try { await api.post(`/api/runs/${st.run_id}/cancel`); toast('Claude check stopped – the jobs already checked keep their new scores'); setSt(null); onStep && onStep() }
+    catch (e) { toast(e.message, 'error') }
+  }
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-teal-200 bg-teal-50/60 px-4 py-2 text-sm" data-testid="check-progress">
+      <Loader2 size={14} className="shrink-0 animate-spin text-teal-600" />
+      <span className="font-semibold text-navy">Claude check {st.done} of {st.total}</span>
+      {st.current && <span className="truncate text-slate-600">now: {st.current.name}</span>}
+      {st.changed?.length > 0 && <span className="shrink-0 text-xs text-slate-500">{st.changed.length} score(s) changed</span>}
+      <button className="btn-outline ml-auto shrink-0 py-1 text-xs" onClick={stop}>Stop</button>
+    </div>)
 }
 
 export function JobDetail({ id, onClose, onChanged, onDelete }) {

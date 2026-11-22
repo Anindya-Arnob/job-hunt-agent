@@ -1226,6 +1226,29 @@ async def boost_apply(job_id: int, body: BoostIn):
     return {**out, "run_id": run_id, "already_building": already, "stopped": []}
 
 
+class CheckIn(BaseModel):
+    job_ids: list[int]
+
+
+@app.post("/api/claude-check")
+async def claude_check_many(body: CheckIn):
+    """Claude check for the ticked jobs, one after another in the background."""
+    from ..steps import adread
+    if not body.job_ids:
+        _err(ValueError("Tick at least one job"))
+    if not adread.can_read():
+        _err(ValueError("Claude Code is not logged in – log in (top left) to let Claude read the ads"))
+    try:
+        return await runs.start_claude_check(body.job_ids)
+    except runs.Busy as e:
+        _err(e, 409)
+
+
+@app.get("/api/claude-check/active")
+def claude_check_active():
+    return runs.active_check()
+
+
 @app.post("/api/jobs/{job_id}/claude-check")
 async def claude_check(job_id: int, again: bool = False):
     """Claude reads this ad (small model, once) and the job's score and knock-outs are updated. Nothing is built."""

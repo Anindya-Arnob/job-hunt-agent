@@ -148,6 +148,96 @@ async def resume_build(run_id: int, job_ids: list[int]) -> int:
     return run_id
 
 
+# Claude check on the jobs you ticked: one ad after another, in the background. run id -> progress
+CHECKING: dict[int, dict] = {}
+
+
+def active_check() -> Optional[dict]:
+    for rid, st in list(CHECKING.items()):
+        if rid in _tasks and not _tasks[rid].done():
+            return {"run_id": rid, **{k: v for k, v in st.items() if k != "job_ids"}}
+        CHECKING.pop(rid, None)
+    return None
+
+
+async def start_claude_check(job_ids: list[int]) -> dict:
+    """Claude reads the ads of the ticked jobs one by one (ads it read before are skipped: no tokens) and each
+    job's score and knock-outs are updated as soon as its ad is read."""
+    from ..steps import adread
+    if active_check():
+        raise Busy("A Claude check is already running – wait for it or stop it first.")
+    todo = [j for j in dict.fromkeys(job_ids) if adread.cached(j) is None]
+    skipped = len(set(job_ids)) - len(todo)
+    if not todo:
+        return {"run_id": None, "total": 0, "skipped": skipped}
+    run_id = _new_run("claude_check")
+    CHECKING[run_id] = {"total": len(todo), "done": 0, "skipped": skipped, "current": None, "changed": [],
+                        "job_ids": todo}
+    _track(run_id, _claude_check(run_id, todo))
+    return {"run_id": run_id, "total": len(todo), "skipped": skipped}
+
+
+def _job_name(jid: int) -> str:
+    with db.session_scope() as s:
+        j = s.get(m.Job, jid)
+        return f"{j.company} – {j.title}" if j else f"job {jid}"
+
+
+async def _claude_check(run_id: int, ids: list[int]) -> None:
+    from ..steps import adread
+    st = CHECKING[run_id]
+    errors, status = [], "done"
+    events.emit({"type": "claude_check", "message": f"Claude check: {len(ids)} job(s), one after another"},
+                run_id=run_id)
+    try:
+        for i, jid in enumerate(ids):
+            st["current"] = {"job_id": jid, "name": _job_name(jid)}
+
+            def one(jid=jid):
+                llm.set_current_run(run_id)
+                try:
+                    return adread.check(jid)
+                finally:
+                    llm.set_current_run(None)
+            try:
+                out = await asyncio.to_thread(one)
+            except KeyError:                       # deleted meanwhile
+                st["done"] = i + 1
+                continue
+            if not out["read_by_claude"]:          # not logged in / limit: stop, do not walk through the rest
+                errors.append("Claude could not read the ad (log in to Claude Code, or the usage limit was hit)")
+                status = "failed"
+                events.emit({"type": "claude_check", "message": f"Stopped: {errors[-1]}", "level": "warn"},
+                            run_id=run_id)
+                break
+            c = out.get("check") or {}
+            st["done"] = i + 1
+            if c.get("before") is not None and c.get("before") != c.get("after"):
+                st["changed"].append({"job_id": jid, "before": c["before"], "after": c["after"]})
+            msg = f"{st['current']['name']}: score {c.get('before')} → {c.get('after')}" if c else st["current"]["name"]
+            if out.get("must_have"):
+                msg += " · must have: " + "; ".join(" or ".join(g) for g in out["must_have"])
+            events.emit({"type": "claude_check", "job_id": jid, "message": msg, "done": i + 1, "total": len(ids)},
+                        run_id=run_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:                         # never leave the run on 'running'
+        errors.append(str(e)[:300])
+        status = "failed"
+    finally:
+        CHECKING.pop(run_id, None)
+    with db.session_scope() as s:
+        r = s.get(m.Run, run_id)
+        if r and r.status == "running":
+            r.status, r.finished_at = status, datetime.now().astimezone()
+            r.counts = {"checked": st["done"], "skipped": st["skipped"], "score_changed": len(st["changed"])}
+            r.errors = errors
+            r.cost_usd = round(llm.cost_tracker.run_cost.get(run_id, 0.0), 4)
+            s.add(r)
+    events.emit({"type": "run_done", "message": f"Claude check finished: {st['done']} checked, "
+                 f"{len(st['changed'])} score(s) changed", "kind": "claude_check"}, run_id=run_id)
+
+
 async def cancel(run_id: int) -> bool:
     t = _tasks.get(run_id)
     if t and not t.done():

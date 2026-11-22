@@ -226,3 +226,45 @@ def test_claude_check_reads_only_and_shows_the_score_change(setup, claude_reads,
         assert c.post("/api/jobs/99999/claude-check").status_code == 404
         monkeypatch.setattr(adread, "can_read", lambda: False)
         assert "not logged in" in c.post(f"/api/jobs/{jid}/claude-check").json()["detail"]
+
+
+def _wait_check(c):
+    import time
+    for _ in range(200):
+        if not c.get("/api/claude-check/active").json():
+            return
+        time.sleep(0.1)
+    raise AssertionError("Claude check did not finish")
+
+
+def test_claude_check_for_the_ticked_jobs_one_after_another(setup, claude_reads):  # noqa: F811
+    from fastapi.testclient import TestClient
+    from jobagent.api.main import app
+    jid = _sap_job(setup)
+    other = setup["accent"]
+    with TestClient(app) as c:
+        r = c.post("/api/claude-check", json={"job_ids": [jid, other]}).json()
+        assert r["run_id"] and r["total"] == 2 and r["skipped"] == 0
+        _wait_check(c)
+        assert len(claude_reads) == 2
+        for j in (jid, other):
+            d = c.get(f"/api/jobs/{j}").json()
+            assert d["read_by_claude"] and d["claude_check"] and not d["documents"]       # read, nothing built
+        run = c.get(f"/api/runs/{r['run_id']}").json()
+        run = run.get("run", run)
+        assert run["status"] == "done" and run["counts"]["checked"] == 2
+        r = c.post("/api/claude-check", json={"job_ids": [jid, other]}).json()   # read already: no tokens
+        assert r["run_id"] is None and r["skipped"] == 2 and len(claude_reads) == 2
+        assert c.post("/api/claude-check", json={"job_ids": []}).status_code == 400
+
+
+def test_claude_check_stops_when_claude_cannot_read(setup, monkeypatch):  # noqa: F811
+    from fastapi.testclient import TestClient
+    from jobagent.api.main import app
+    monkeypatch.setattr(A, "can_read", lambda: True)          # looks logged in, but every read falls back
+    with TestClient(app) as c:
+        r = c.post("/api/claude-check", json={"job_ids": [setup["good"], setup["accent"]]}).json()
+        _wait_check(c)
+        run = c.get(f"/api/runs/{r['run_id']}").json()
+        run = run.get("run", run)
+        assert run["status"] == "failed" and run["counts"]["checked"] == 0 and "could not read" in run["errors"][0]

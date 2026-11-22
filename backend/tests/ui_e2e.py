@@ -271,6 +271,23 @@ with sync_playwright() as p:
     assert stopped_now == 0, stopped_now                                         # built: off the Stopped tab
     page.goto(BASE + "/jobs")
     page.get_by_role("button", name=re.compile(r"^New\s*\d+$")).click()        # the board remembers its tab
+    # Claude check for the ticked jobs: one after another, scores updated, nothing built
+    rows = page.locator(".ag-pinned-left-cols-container .ag-row")
+    rows.nth(0).locator("input[type=checkbox]").check()
+    rows.nth(1).locator("input[type=checkbox]").check()
+    expect(page.get_by_test_id("check-selected")).to_have_text("Claude check (2)")
+    shot(page, "10b3_check_selected")
+    page.get_by_test_id("check-selected").click()
+    expect(page.get_by_text(re.compile(r"Claude check started: \d job"))).to_be_visible()
+    for _ in range(60):
+        if page.evaluate("async () => await (await fetch('/api/claude-check/active')).json()") is None:
+            break
+        page.wait_for_timeout(500)
+    runs_ = page.evaluate("async () => (await (await fetch('/api/runs')).json())")
+    runs_ = runs_.get("runs", runs_) if isinstance(runs_, dict) else runs_
+    chk = next(r for r in runs_ if r["kind"] == "claude_check")
+    assert chk["status"] == "done" and chk["counts"]["checked"] >= 1, chk
+    expect(page.get_by_test_id("check-progress")).to_have_count(0)
     page.evaluate(f"fetch('/api/jobs/{pick['id']}', {{method: 'DELETE'}})")    # the later steps expect one built job
 
     # 7b My details (prefilled from the CV) + Apply queue
