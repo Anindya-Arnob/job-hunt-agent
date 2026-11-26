@@ -67,11 +67,19 @@ def level_of(text: str) -> Optional[str]:
 def required_levels(description: str) -> dict[str, str]:
     """language -> lowest level the ad requires ('German is a plus' is not a requirement)."""
     out: dict[str, str] = {}
+    low_all = (description or "").lower()
+    langs = {k: [n for n in names if n.lower() in low_all] for k, names in LANGS.items()}
+    langs = {k: v for k, v in langs.items() if v}
+    if not langs:                                    # no language named at all: nothing to read
+        return out
     for seg in re.split(r"[\n;,•·*]+|\s-\s(?=[A-ZÄÖÜ][a-zäöü]+\s*[-:–])", description or ""):
-        if _NICE.search(seg):
+        low = seg.lower()
+        here = {k: [n for n in v if n.lower() in low] for k, v in langs.items()}
+        here = {k: v for k, v in here.items() if v}
+        if not here or _NICE.search(seg):
             continue
         pos = {}
-        for k, names in LANGS.items():
+        for k, names in here.items():
             m = min((x.start() for n in names for x in re.finditer(rf"\b{n}", seg, re.I)), default=None)
             if m is not None:
                 pos[k] = m

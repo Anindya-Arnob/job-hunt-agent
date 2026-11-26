@@ -38,6 +38,18 @@ from contextlib import asynccontextmanager
 
 
 @asynccontextmanager
+def _warm_knockouts() -> None:
+    """Read what each ad asks for (languages, years, degree ...) once at start, in the background."""
+    try:
+        from ..steps import knockouts as K
+        with db.session_scope() as s:
+            descs = s.exec(select(m.Job.full_description).where(m.Job.status != "excluded")).all()
+        for d in descs:
+            K._needs(d or "")
+    except Exception as e:
+        log.warning("warm-up: %s", e)
+
+
 async def lifespan(_app):
     db.init_db()
     try:
@@ -68,6 +80,7 @@ async def lifespan(_app):
     scheduler.start()
     from ..sync_docs import sync_all
     asyncio.get_running_loop().run_in_executor(None, sync_all)   # match CV files on disk in the background
+    asyncio.get_running_loop().run_in_executor(None, _warm_knockouts)  # so the first Job board load is quick
     yield
     scheduler.stop()
 
@@ -1315,10 +1328,18 @@ def doc_dict(d: m.Document) -> dict:
             "content": {k: v for k, v in (d.content or {}).items() if not k.startswith("_")}}
 
 
+_LAST_SYNC = [0.0]
+
+
 @app.get("/api/documents")
-def list_documents(job_id: Optional[int] = None):
+def list_documents(job_id: Optional[int] = None, sync: bool = False):
+    """Your documents. The folders on disk are checked at most once a minute (or with sync=true, the Refresh
+    button): checking every CV folder on each visit took ~2.5 s on a PC with 1,000+ CVs."""
+    import time as _t
     from ..sync_docs import sync_all
-    sync_all()
+    if sync or _t.monotonic() - _LAST_SYNC[0] > 60:
+        sync_all()
+        _LAST_SYNC[0] = _t.monotonic()
     with db.session_scope() as s:
         q = select(m.Document)
         if job_id:

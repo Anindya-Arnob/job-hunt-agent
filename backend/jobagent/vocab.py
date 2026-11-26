@@ -161,8 +161,12 @@ def find_concepts(text: str) -> list[str]:
     """Concepts an ad (or a CV) names in any of their forms. Short forms (AI, KI, ML, API) only count with
     their capitals, so 'ai' or 'ml' inside other words or URLs do not."""
     out = []
+    text = text or ""
+    low = text.lower()
     for c, vs in CONCEPTS.items():
         for v in [c, *vs]:
+            if _low(v) not in low:
+                continue
             if len(v) <= 3:
                 if re.search(rf"(?<![A-Za-z0-9+#]){re.escape(v)}(?![A-Za-z0-9+#])", text or ""):
                     out.append(c)
@@ -186,11 +190,23 @@ def term_regex(term: str) -> re.Pattern:
     return _word_cache[term]
 
 
+_lower_cache: dict[str, str] = {}
+
+
+def _low(term: str) -> str:
+    lt = _lower_cache.get(term)
+    if lt is None:
+        lt = _lower_cache[term] = term.lower()
+    return lt
+
+
 def find_terms(text: str, terms=None) -> list[str]:
     terms = terms or SKILLS
+    text = text or ""
+    low = text.lower()
     out = []
-    for t in terms:
-        if term_regex(t).search(text or ""):
+    for t in terms:      # the word itself must be in the text before the (slower) whole-word check runs
+        if _low(t) in low and term_regex(t).search(text):
             out.append(t)
     # prefer the longer term when both match (e.g. "MongoDB Atlas" over "MongoDB")
     return [t for t in out if not any(o != t and t.lower() in o.lower() for o in out)]

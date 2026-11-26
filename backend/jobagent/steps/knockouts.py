@@ -12,6 +12,7 @@ CV is built (a knock-out stops the build: no tokens spent), on the job board and
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from datetime import date
 from typing import Optional
 
@@ -25,8 +26,9 @@ MONTHS = {"jan": 1, "feb": 2, "mar": 3, "mär": 3, "maer": 3, "apr": 4, "may": 5
 _NOW = re.compile(r"present|current|heute|jetzt|aktuell|now|laufend|ongoing|today", re.I)
 
 
-def _segments(text: str) -> list[str]:
-    return [s for s in re.split(r"[\n;•·*]+|(?<=[.!?])\s+", text or "") if s.strip()]
+@lru_cache(maxsize=256)
+def _segments(text: str) -> tuple:
+    return tuple(s for s in re.split(r"[\n;•·*]+|(?<=[.!?])\s+", text or "") if s.strip())
 
 
 # ------------------------------------------------------------------ experience ---
@@ -45,13 +47,16 @@ _YEARS_WORD = [
 ]
 
 
+_YEARS_HINT = re.compile(r"experience|erfahrung|years|jahre", re.I)
+
+
 def required_years(text: str) -> Optional[float]:
     """The most work experience the ad requires, in years (None when it asks for none)."""
     need = None
     for seg in _segments(text):
-        if NICE.search(seg) or re.search(r"\berste\w*\s+(?:praktische\s+)?erfahrung|first experience", seg, re.I):
+        if not _YEARS_HINT.search(seg):          # cheap test first: most sentences say nothing about it
             continue
-        if not re.search(r"experience|erfahrung|years|jahre", seg, re.I):
+        if NICE.search(seg) or re.search(r"\berste\w*\s+(?:praktische\s+)?erfahrung|first experience", seg, re.I):
             continue
         found = None
         seg = re.sub(r"(\d{1,2})\s*(?:-|–|bis|to)\s*\d{1,2}(\s*(?:years?|jahre))", r"\1\2", seg, flags=re.I)  # 2-4 -> 2
@@ -125,9 +130,17 @@ def _fmt_months(n: int) -> str:
 _LEVEL = {"any": 1, "bachelor": 1, "master": 2, "phd": 3}
 
 
+_DEG_HINT = re.compile(r"ph\.?\s?d|promotion|doctor|doktor|master|diplom|bachelor|degree|studium|abgeschlossen|"
+                       r"completed|finished", re.I)
+
+
 def required_degree(text: str) -> Optional[str]:
     need = None
+    if not _DEG_HINT.search(text or ""):
+        return None
     for seg in _segments(text):
+        if not _DEG_HINT.search(seg):            # cheap test first: most sentences say nothing about a degree
+            continue
         if NICE.search(seg) or re.search(r"student|studierend|enrolled|pursuing|thesis|arbeit\b|masterarbeit|"
                                          r"bachelorarbeit|werkstudent|praktikum|internship|im studium", seg, re.I):
             continue
@@ -177,16 +190,27 @@ def _yes(v: str) -> Optional[bool]:
 
 
 def _asks(rx: re.Pattern, text: str) -> bool:
+    if not rx.search(text or ""):                # not in the ad at all: no need to look sentence by sentence
+        return False
     return any(rx.search(seg) and not NICE.search(seg) for seg in _segments(text))
 
 
 # ----------------------------------------------------------------------- all ---
+@lru_cache(maxsize=8192)
+def _needs(description: str) -> tuple:
+    """What the ad asks for (languages, years, degree, permit, student): read once per ad text, kept in memory.
+    Reading it again for ~1,400 jobs whenever the list reloaded took 6-11 seconds."""
+    from ..docs.ats import required_levels
+    return (tuple(required_levels(description).items()), required_years(description), required_degree(description),
+            _asks(_PERMIT, description), _asks(_STUDENT, description))
+
+
 def check(description: str, prof, details=None, must=None) -> list[dict]:
     """Every requirement the ad states that this check knows, met or not:
     {"key", "label", "need", "have", "ok", "text"}. Not met = a knock-out.
     `must`: the tools the ad itself marks as required, as Claude read them ([["Gurobi", "CPLEX", "OR-Tools"]]:
     one of them is enough)."""
-    from ..docs.ats import CEFR, LANGS, hit, level_of, required_levels
+    from ..docs.ats import CEFR, LANGS, hit, level_of
     out = []
     if must:
         from .score import profile_text
@@ -198,7 +222,8 @@ def check(description: str, prof, details=None, must=None) -> list[dict]:
                         "have": "in your CV" if ok else "not in your CV", "ok": ok,
                         "text": f"Required: the ad asks for {need}, your CV " +
                                 ("shows it" if ok else "does not show " + ("it" if len(names) == 1 else "any of them"))})
-    for k, need in required_levels(description).items():
+    levels, yrs, deg, asks_permit, asks_student = _needs(description or "")
+    for k, need in levels:
         mine = [l for l in prof.languages if any(n in l.language.lower() for n in LANGS[k])]
         have = level_of(mine[0].level) if mine else None
         if not have and details is not None:            # My details as a fallback
@@ -207,13 +232,11 @@ def check(description: str, prof, details=None, must=None) -> list[dict]:
         out.append({"key": f"language:{k}", "label": k.title(), "need": need, "have": have or "not listed", "ok": ok,
                     "text": f"{k.title()}: the ad asks for {need}, your CV " +
                             (f"says {have}" if have else "does not list it")})
-    yrs = required_years(description)
     if yrs:
         months = work_months(prof)
         ok = months >= yrs * 12 * 0.9
         out.append({"key": "experience", "label": "Experience", "need": f"{yrs:g}+ years", "have": _fmt_months(months),
                     "ok": ok, "text": f"Experience: the ad asks for {yrs:g}+ years, your CV shows {_fmt_months(months)}"})
-    deg = required_degree(description)
     if deg:
         have = finished_degree(prof)
         ok = have is not None and _LEVEL[have] >= _LEVEL[deg]
@@ -223,7 +246,7 @@ def check(description: str, prof, details=None, must=None) -> list[dict]:
                     "ok": ok, "text": f"Degree: the ad asks for {name}, your CV shows " +
                                       ({"bachelor": "a finished Bachelor's", "master": "a finished Master's",
                                         "phd": "a PhD"}.get(have, "no finished degree"))})
-    if _asks(_PERMIT, description):
+    if asks_permit:
         auth = _yes(getattr(details, "work_authorized", "")) if details is not None else None
         sponsor = _yes(getattr(details, "needs_sponsorship", "")) if details is not None else None
         ok = None if auth is None else (auth and not sponsor)
@@ -233,7 +256,7 @@ def check(description: str, prof, details=None, must=None) -> list[dict]:
                     "text": "Work permit: required" + (", you have one" if ok else
                                                        " - fill in 'work permit' on My details" if ok is None else
                                                        ", My details says you need one")})
-    if _asks(_STUDENT, description):
+    if asks_student:
         st = _yes(getattr(details, "enrolled_student", "")) if details is not None else None
         if st is None:
             st = any(_NOW.search(ed.dates or "") for ed in prof.education)
@@ -248,10 +271,19 @@ def knockouts(description: str, prof, details=None, must=None) -> list[str]:
     return [r["text"] for r in check(description, prof, details, must) if not r["ok"]]
 
 
+_MUST_ALL: dict = {"version": None, "by_job": {}}
+
+
 def must_for(job_id) -> list[list[str]]:
-    """The must-have tools Claude read in this job's ad (none until the ad has been read)."""
+    """The must-have tools Claude read in this job's ad (none until the ad has been read). All jobs' are loaded
+    in one query and kept until Claude reads another ad."""
     from . import adread
-    return adread.must_groups(adread.cached(job_id)) if job_id else []
+    if not job_id:
+        return []
+    if _MUST_ALL["version"] != adread.VERSION[0]:
+        _MUST_ALL["by_job"] = adread.all_must()
+        _MUST_ALL["version"] = adread.VERSION[0]
+    return _MUST_ALL["by_job"].get(job_id, [])
 
 
 def for_job(job, prof, details=None) -> list[str]:

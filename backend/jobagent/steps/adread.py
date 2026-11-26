@@ -276,6 +276,7 @@ def _store(words: dict) -> None:
 
 def load_learned() -> None:
     vocab.set_learned({k: v.get("also", []) for k, v in learned().items()})
+    VERSION[0] += 1                 # a (new) database: what was kept in memory from another one is stale
 
 
 def learn(ad: AdRead, source: str = "") -> list[str]:
@@ -292,17 +293,49 @@ def learn(ad: AdRead, source: str = "") -> list[str]:
         new.append(t)
     if new:
         _store(words)
-        _rescore()
+        _rescore_mentioning(new)
     return new
+
+
+def _jobs_mentioning(words: list[str]) -> list[int]:
+    """Jobs whose title or ad contains one of these words: only their free score can change."""
+    from sqlmodel import select
+    lows = [w.lower() for w in words if w]
+    alts = [a.lower() for w in words for a in vocab.LEARNED.get(w, [])]
+    lows += [a for a in alts if len(a) > 2]
+    if not lows:
+        return []
+    ids = []
+    with db.session_scope() as s:
+        for jid, title, desc in s.exec(select(m.Job.id, m.Job.title, m.Job.full_description)).all():
+            t = f"{title or ''} {desc or ''}".lower()
+            if any(w in t for w in lows):
+                ids.append(jid)
+    return ids
+
+
+def _rescore_mentioning(words: list[str]) -> None:
+    """Re-score (free) the jobs that mention new words, in the background: re-scoring every job after each
+    learned word kept the app busy for minutes during Claude checks and builds."""
+    import threading
+
+    def go():
+        try:
+            ids = _jobs_mentioning(words)
+            if ids:
+                _rescore(ids)
+        except Exception as e:
+            log.warning("re-score after learning words: %s", e)
+    threading.Thread(target=go, name="rescore-learned", daemon=True).start()
 
 
 def forget(word: str) -> bool:
     words = learned()
     if word not in words:
         return False
-    words.pop(word)
+    also = words.pop(word).get("also", [])
     _store(words)
-    _rescore()
+    _rescore_mentioning([word, *also])
     return True
 
 
@@ -322,5 +355,20 @@ def checked_all() -> dict[int, dict]:
                 if jid in out:
                     out[jid] = json.loads(row.value)
             except (ValueError, TypeError):
+                pass
+    return out
+
+
+def all_must() -> dict[int, list[list[str]]]:
+    """job id -> the must-have tool groups Claude read in its ad, for every job, in one query."""
+    from sqlmodel import select
+    out: dict[int, list[list[str]]] = {}
+    with db.session_scope() as s:
+        for row in s.exec(select(m.AppSetting).where(m.AppSetting.key.startswith("ad_read:"))).all():
+            try:
+                g = must_groups(AdRead.model_validate(json.loads(row.value)))
+                if g:
+                    out[int(row.key[8:])] = g
+            except Exception:
                 pass
     return out
